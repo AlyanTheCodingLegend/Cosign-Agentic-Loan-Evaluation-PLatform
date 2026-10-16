@@ -40,3 +40,7 @@ pnpm-debug.log*
 Thumbs.db
 .vscode/
 .idea/
+
+# Home Credit data and sampled output
+seed/home_credit_sample.jsonl
+*.csv
