@@ -8,7 +8,17 @@ from typing import Any, Protocol
 import openai
 from pydantic import ValidationError
 
-from app.config import MODEL_MAX_RETRIES, MODEL_TIMEOUT_SECONDS, get_settings
+from app.agent.policy import score_average
+from app.config import (
+    MODEL_MAX_RETRIES,
+    MODEL_TIMEOUT_SECONDS,
+    POLICY_DECLINE_PAYMENT_TO_INCOME,
+    POLICY_DECLINE_SCORE_AVERAGE,
+    POLICY_REFER_LOAN_TO_INCOME,
+    POLICY_REFER_PAYMENT_TO_INCOME,
+    POLICY_REFER_SCORE_AVERAGE,
+    get_settings,
+)
 from app.models.contract import ReasonerInput, ReasonerOutput, Recommendation
 
 logger = logging.getLogger(__name__)
@@ -16,23 +26,34 @@ logger = logging.getLogger(__name__)
 REASONER_SCHEMA_NAME = "reasoner_output"
 FALLBACK_REASON = "Automated assessment was unavailable or invalid; manual review is required."
 
-SYSTEM_PROMPT = """You are a loan underwriting analyst. You receive structured applicant fields \
-and affordability metrics that were already computed in code. Never recompute or adjust the \
-numbers; use them as given.
+SYSTEM_PROMPT = f"""You are a loan underwriting analyst. You receive structured applicant \
+fields and affordability metrics that were already computed in code. Never recompute or adjust \
+the numbers; use them as given.
 
 Return a JSON object with exactly these keys:
 - recommendation: "approve", "decline" or "refer"
 - confidence: a number between 0 and 1
 - reasons: a non-empty list of short strings; each must cite the specific field or metric it \
-rests on, for example "payment_to_income 0.62 is above a comfortable range"
-- needs_human: true unless you recommend approve with high confidence
+rests on, for example "payment_to_income 0.62"
+- needs_human: true unless you recommend approve
 - human_question: a specific question for the human, or null
+
+Recommendation policy. Apply these rules in order and use the first that matches. Use \
+metrics.ext_source_average as given; it is the mean of the available ext_source scores.
+1. ext_source_average is null (all three scores missing): refer, confidence 0.4, and ask for \
+an external credit score in human_question.
+2. payment_to_income above {POLICY_DECLINE_PAYMENT_TO_INCOME} or ext_source_average at or \
+below {POLICY_DECLINE_SCORE_AVERAGE}: decline, confidence 0.85.
+3. payment_to_income above {POLICY_REFER_PAYMENT_TO_INCOME}, or loan_to_income above \
+{POLICY_REFER_LOAN_TO_INCOME}, or ext_source_average at or below \
+{POLICY_REFER_SCORE_AVERAGE}: refer, confidence 0.6.
+4. Otherwise approve, with confidence 0.9 minus 0.1 for each ext_source that is null.
 
 Rules:
 - needs_human must be true whenever recommendation is not "approve".
-- human_question must be null when needs_human is false.
-- A null ext_source_1/2/3 means the score is unavailable. Treat that as missing information, \
-lower your confidence, and say so in the reasons.
+- human_question must be null when needs_human is false, and null for decline and refer \
+except in rule 1.
+- Say in the reasons when an ext_source is null.
 - Judge only on the data given. Never infer or mention age, gender or family status."""
 
 
@@ -97,10 +118,12 @@ def get_model_client() -> ModelClient:
 
 def build_prompt(inp: ReasonerInput) -> str:
     """Build the reasoner prompt from fields and precomputed metrics, without protected data."""
-    payload = {
-        "fields": inp.fields.model_dump(mode="json"),
-        "metrics": inp.metrics.model_dump(mode="json"),
-    }
+    fields = inp.fields
+    # The average is computed here, in code, so the model never does the arithmetic.
+    average = score_average([fields.ext_source_1, fields.ext_source_2, fields.ext_source_3])
+    metrics = inp.metrics.model_dump(mode="json")
+    metrics["ext_source_average"] = None if average is None else round(average, 4)
+    payload = {"fields": fields.model_dump(mode="json"), "metrics": metrics}
     return "Assess this loan application and answer in JSON.\n" + json.dumps(payload, indent=2)
 
 

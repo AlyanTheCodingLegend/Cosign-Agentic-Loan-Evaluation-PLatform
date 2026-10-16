@@ -1,12 +1,15 @@
 import json
+import re
 from typing import Any
 
 import pytest
 
+from app import config
 from app.agent.fake_model import FakeModelClient
 from app.agent.metrics import compute_metrics
 from app.agent.reasoner import (
     FALLBACK_REASON,
+    SYSTEM_PROMPT,
     ModelError,
     build_prompt,
     recommend,
@@ -108,7 +111,7 @@ def test_prompt_contains_metrics_and_no_protected_terms(
     assert "payment_to_income" in prompt
     assert "loan_to_income" in prompt
     for term in ("gender", "birth", "age", "family", "marital"):
-        assert term not in prompt
+        assert not re.search(rf"{term}", prompt)
 
 
 def test_fake_model_approves_a_healthy_case(complete_fields: dict[str, object]) -> None:
@@ -136,3 +139,38 @@ def test_fake_model_refers_when_all_scores_missing(complete_fields: dict[str, ob
 
     assert output.recommendation is Recommendation.REFER
     assert output.human_question is not None
+
+
+def test_prompt_adds_ext_source_average_computed_in_code(
+    complete_fields: dict[str, object],
+) -> None:
+    payload = _payload_of(
+        _input({**complete_fields, "ext_source_1": 0.2, "ext_source_2": 0.4, "ext_source_3": None})
+    )
+
+    assert payload["metrics"]["ext_source_average"] == 0.3
+
+
+def test_prompt_average_is_null_when_all_scores_missing(
+    complete_fields: dict[str, object],
+) -> None:
+    payload = _payload_of(_input({**complete_fields, "ext_source_2": None}))
+
+    assert payload["metrics"]["ext_source_average"] is None
+
+
+def test_system_prompt_states_the_configured_policy() -> None:
+    for value in (
+        config.POLICY_DECLINE_PAYMENT_TO_INCOME,
+        config.POLICY_REFER_PAYMENT_TO_INCOME,
+        config.POLICY_REFER_LOAN_TO_INCOME,
+        config.POLICY_DECLINE_SCORE_AVERAGE,
+        config.POLICY_REFER_SCORE_AVERAGE,
+    ):
+        assert str(value) in SYSTEM_PROMPT
+
+
+def _payload_of(inp: ReasonerInput) -> dict[str, Any]:
+    prompt = build_prompt(inp)
+    payload: dict[str, Any] = json.loads(prompt[prompt.index("{") :])
+    return payload
