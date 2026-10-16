@@ -1,7 +1,7 @@
 """Shared contract models: applicant fields, metrics, reasoner input and reasoner output."""
 
 from enum import StrEnum
-from typing import Literal, Self
+from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -25,7 +25,10 @@ class ApplicantFields(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    # Income stated on the form.
     annual_income: float | None = Field(default=None, gt=0)
+    # Income read from a supporting document. None when there is no document (e.g. Home Credit).
+    document_income: float | None = Field(default=None, gt=0)
     loan_amount: float | None = Field(default=None, gt=0)
     annuity: float | None = Field(default=None, gt=0)
     goods_price: float | None = Field(default=None, gt=0)
@@ -33,7 +36,6 @@ class ApplicantFields(BaseModel):
     ext_source_1: float | None = Field(default=None, ge=0, le=1)
     ext_source_2: float | None = Field(default=None, ge=0, le=1)
     ext_source_3: float | None = Field(default=None, ge=0, le=1)
-    stated_income_source: Literal["form", "document"]
 
 
 class Metrics(BaseModel):
@@ -43,7 +45,7 @@ class Metrics(BaseModel):
 
     loan_to_income: float = Field(ge=0)
     payment_to_income: float = Field(ge=0)
-    # Fraction, not percent: 0.10 means 10%. None when there is only one income source.
+    # Fraction, not percent: 0.10 means 10%. None when document_income is None.
     income_mismatch_pct: float | None = Field(default=None, ge=0)
 
 

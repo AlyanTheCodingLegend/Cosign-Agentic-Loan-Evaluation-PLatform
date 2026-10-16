@@ -101,8 +101,9 @@ def test_reasoner_output_rejects_invalid_json() -> None:
 
 
 def test_applicant_fields_allow_missing_values() -> None:
-    fields = ApplicantFields(stated_income_source="form")
+    fields = ApplicantFields()
     assert fields.annual_income is None
+    assert fields.document_income is None
 
 
 def test_applicant_fields_reject_protected_attribute(complete_fields: dict[str, object]) -> None:
@@ -110,11 +111,19 @@ def test_applicant_fields_reject_protected_attribute(complete_fields: dict[str, 
         ApplicantFields.model_validate({**complete_fields, "gender": "F"})
 
 
-def test_applicant_fields_reject_unknown_income_source(
+def test_applicant_fields_reject_removed_income_source(
     complete_fields: dict[str, object],
 ) -> None:
     with pytest.raises(ValidationError):
-        ApplicantFields.model_validate({**complete_fields, "stated_income_source": "guess"})
+        ApplicantFields.model_validate({**complete_fields, "stated_income_source": "form"})
+
+
+@pytest.mark.parametrize("income", [0.0, -1.0])
+def test_applicant_fields_reject_non_positive_document_income(
+    complete_fields: dict[str, object], income: float
+) -> None:
+    with pytest.raises(ValidationError):
+        ApplicantFields.model_validate({**complete_fields, "document_income": income})
 
 
 # --- ReasonerInput ---

@@ -47,13 +47,16 @@ Validation rules, enforced by `ReasonerOutput` (model output that breaks them co
 - `needs_human` must be true whenever `recommendation` is not `approve`.
 - `human_question` must be null when `needs_human` is false.
 
-Router rules, evaluated in this order:
+Router rules (`route` in `router.py`), evaluated in this order. Missing required fields never reach the router; the completeness check catches them before metrics.
 
-1. Missing required field (caught by the completeness check before metrics), or stated income differs from the document by more than the tolerance: `needs_info`.
+1. `income_mismatch_pct` (form income vs document income) above the tolerance: `needs_info`, with a `human_question` naming both figures.
 2. Loan amount above the high-amount cutoff: `pending_review`.
 3. Recommendation is `decline` or `refer`: `pending_review`.
-4. Confidence below the threshold: `pending_review`.
-5. Otherwise: `auto_cleared`.
+4. `needs_human` is true: `pending_review`. The model can only escalate, never clear.
+5. Confidence below the threshold: `pending_review`.
+6. Otherwise: `auto_cleared`.
+
+Thresholds trigger strictly: a value exactly at a threshold does not trigger its rule.
 
 All thresholds live in one config module as named constants. No magic numbers in logic.
 
@@ -181,6 +184,7 @@ These come from the product, not from taste. Do not work around them.
 - Source: `application_train.csv` only. Sample 3k to 5k rows stratified on `TARGET`; train on about 2k labeled examples.
 - `DAYS_EMPLOYED == 365243` is a sentinel for pensioners and the unemployed. Convert to null plus a flag.
 - Day columns are negative (days before application). Flip the sign when converting to years.
+- `AMT_INCOME_TOTAL` maps to `annual_income` (form-stated income). Home Credit rows have no document income, so `document_income` is None, `income_mismatch_pct` is None, and router rule 1 never fires on Home Credit data. Seeded demo applicants supply `document_income` to exercise it.
 - Payment-to-income is `AMT_ANNUITY / (AMT_INCOME_TOTAL / 12)`. The main table has no existing-debt figure, so this is payment-to-income, not true DTI. Say so in the pitch.
 - Currency is unspecified. Write thresholds as ratios or percentiles, not absolute amounts.
 - `EXT_SOURCE_1/2/3` are heavily null. Treat null as a real "needs more information" signal, not something to impute silently.
