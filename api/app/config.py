@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     model_api_key: SecretStr = SecretStr("")
     supabase_url: str = ""
     supabase_key: SecretStr = SecretStr("")
+    # Origins allowed to call the API from a browser, comma separated.
+    cors_origins: str = "http://localhost:3000"
 
 
 @lru_cache
