@@ -1,0 +1,9 @@
+# Runs the API from the repo root: `docker compose up --build`.
+# Settings come from .env at the repo root (see .env.example); the file is not baked into the image.
+services:
+  api:
+    build: ./api
+    env_file: .env
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
