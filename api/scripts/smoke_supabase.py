@@ -85,7 +85,9 @@ def _pipeline() -> str:
 @step("audit log has the status changes in order")
 def _audit() -> str:
     events = store.list_events(state["decline"])
-    changes = [(e.payload["from"], e.payload["to"]) for e in events if e.event_type == "status_changed"]
+    changes = [
+        (e.payload["from"], e.payload["to"]) for e in events if e.event_type == "status_changed"
+    ]
     _expect(changes == [("submitted", "analyzing"), ("analyzing", "pending_review")], str(changes))
     return f"{len(events)} events"
 
@@ -95,8 +97,18 @@ def _append_only() -> str:
     client = get_client()
     outcomes = []
     for label, action in (
-        ("update", lambda: client.table("audit_log").update({"actor": "x"}).eq("application_id", state["decline"])),
-        ("delete", lambda: client.table("audit_log").delete().eq("application_id", state["decline"])),
+        (
+            "update",
+            lambda: (
+                client.table("audit_log")
+                .update({"actor": "x"})
+                .eq("application_id", state["decline"])
+            ),
+        ),
+        (
+            "delete",
+            lambda: client.table("audit_log").delete().eq("application_id", state["decline"]),
+        ),
     ):
         try:
             action().execute()
