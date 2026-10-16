@@ -35,14 +35,14 @@ class ApplicationForm(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    annual_income: float | None = None
-    loan_amount: float | None = None
-    annuity: float | None = None
-    goods_price: float | None = None
-    years_employed: float | None = None
-    ext_source_1: float | None = None
-    ext_source_2: float | None = None
-    ext_source_3: float | None = None
+    annual_income: float | None = Field(default=None, gt=0)
+    loan_amount: float | None = Field(default=None, gt=0)
+    annuity: float | None = Field(default=None, gt=0)
+    goods_price: float | None = Field(default=None, gt=0)
+    years_employed: float | None = Field(default=None, ge=0)
+    ext_source_1: float | None = Field(default=None, ge=0, le=1)
+    ext_source_2: float | None = Field(default=None, ge=0, le=1)
+    ext_source_3: float | None = Field(default=None, ge=0, le=1)
 
 
 class ApplicationInput(BaseModel):

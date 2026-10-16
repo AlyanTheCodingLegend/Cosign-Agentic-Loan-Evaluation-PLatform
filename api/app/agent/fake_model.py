@@ -8,10 +8,9 @@ import json
 import re
 from typing import Any
 
+from app.agent.extraction import EXTRACTION_SCHEMA_NAME
 from app.agent.reasoner import REASONER_SCHEMA_NAME, ModelError
 from app.models.contract import ApplicantFields
-
-EXTRACTION_SCHEMA_NAME = "applicant_fields"
 
 # Policy thresholds for the fake reasoner (ratios and scores, no currency amounts).
 DECLINE_PAYMENT_TO_INCOME = 0.50
