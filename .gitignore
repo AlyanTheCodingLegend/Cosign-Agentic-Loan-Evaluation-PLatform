@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Node
+node_modules/
+.next/
+out/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Env and secrets
+.env
+.env.*
+!.env.example
+
+# Model files
+*.gguf
+*.safetensors
+*.bin
+*.pt
+*.ckpt
+
+# OS and editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

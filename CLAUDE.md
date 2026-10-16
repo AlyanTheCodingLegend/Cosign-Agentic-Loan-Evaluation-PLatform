@@ -13,12 +13,17 @@ Every action is written to an audit log. Every reviewer override is stored with 
 ## Pipeline
 
 ```
-submit -> extraction (LLM) -> metrics (code) -> reasoner (LLM) -> router (rules)
-                                                                     |
+submit -> extraction (LLM) -> completeness check (code) -> metrics (code) -> reasoner (LLM) -> router (rules)
+                                     |                                                                |
+                                     missing field -> needs_info                                      |
                           needs_info <- applicant replies -> analyzing again
                           pending_review -> reviewer approves / rejects / overrides -> decided
                           auto_cleared -> decided
 ```
+
+The completeness check (`check_completeness` in `router.py`) runs right after extraction, before metrics. If any required field (`annual_income`, `loan_amount`, `annuity`, `goods_price`, listed in `REQUIRED_FIELDS` in `contract.py`) is missing, the pipeline sets `needs_info` with a `human_question` naming the missing fields and skips metrics and the reasoner. `ReasonerInput` also rejects incomplete fields as a safety net.
+
+Allowed status transitions live in `ALLOWED_TRANSITIONS` in `status.py`; every change goes through `transition(current, new)`, which raises `InvalidTransition` on an illegal move. `decided` is terminal.
 
 Status enum (single source of truth, see `api/app/models/status.py`):
 `submitted`, `analyzing`, `needs_info`, `pending_review`, `auto_cleared`, `decided`.
@@ -35,9 +40,16 @@ Reasoner output contract (see `api/app/models/contract.py`):
 }
 ```
 
+Validation rules, enforced by `ReasonerOutput` (model output that breaks them counts as invalid JSON under hard rule 7):
+
+- `confidence` is between 0 and 1.
+- `reasons` has at least one entry.
+- `needs_human` must be true whenever `recommendation` is not `approve`.
+- `human_question` must be null when `needs_human` is false.
+
 Router rules, evaluated in this order:
 
-1. Missing required field, or stated income differs from the document by more than the tolerance: `needs_info`.
+1. Missing required field (caught by the completeness check before metrics), or stated income differs from the document by more than the tolerance: `needs_info`.
 2. Loan amount above the high-amount cutoff: `pending_review`.
 3. Recommendation is `decline` or `refer`: `pending_review`.
 4. Confidence below the threshold: `pending_review`.
@@ -66,10 +78,11 @@ Endpoints:
 
 MCP tools exposed by the agent: `get_application`, `compute_metrics`, `request_info`, `flag_for_review`, `log_event`.
 
-## Repo layout (proposed, adjust once scaffolded)
+## Repo layout
 
 ```
 api/
+  pyproject.toml       deps and ruff, mypy, pytest config
   app/
     main.py            FastAPI app and route registration
     config.py          settings from env, router thresholds
@@ -80,9 +93,9 @@ api/
       reasoner.py      the single function that calls the model
       router.py        routing rules, pure function
       pipeline.py      orchestrates the steps and status transitions
-    mcp/               MCP server and tool definitions
-    models/            contract.py, status.py, db row types
-    db/                Supabase client, event and override writers
+    mcp/server.py      MCP server and tool definitions (mcp 2.x, MCPServer)
+    models/            contract.py (fields, metrics, reasoner I/O), status.py, application.py (raw input)
+    db/                client.py (Supabase client), audit.py (event and override writers)
   tests/
   seed/                seeded demo applicants
   Dockerfile
@@ -93,9 +106,15 @@ db/schema.sql
 
 ## Commands
 
-Update this section as soon as the scaffolding exists.
+API commands assume the venv in `api/.venv` is active. Env vars are read from `.env` at the repo root (see `.env.example`).
 
 ```
+# API setup (once, from the repo root)
+cd api
+python -m venv .venv
+.venv\Scripts\activate          # Windows; on macOS/Linux: source .venv/bin/activate
+pip install -e ".[dev]"
+
 # API
 cd api && uvicorn app.main:app --reload
 cd api && pytest
