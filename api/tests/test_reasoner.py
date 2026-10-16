@@ -121,7 +121,7 @@ def test_fake_model_approves_a_healthy_case(complete_fields: dict[str, object]) 
 
 
 def test_fake_model_declines_unaffordable_payment(complete_fields: dict[str, object]) -> None:
-    inp = _input({**complete_fields, "annuity": 6_500.0, "ext_source_1": 0.7})
+    inp = _input({**complete_fields, "annuity": 60_000.0, "ext_source_1": 0.7})
 
     output = recommend(inp, FakeModelClient())
 

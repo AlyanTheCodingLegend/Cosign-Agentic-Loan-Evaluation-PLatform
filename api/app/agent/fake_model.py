@@ -1,7 +1,7 @@
 """Rule-based stand-in for the model, used with USE_FAKES for tests and local runs.
 
-The reasoner policy here is a simple threshold function. It is a placeholder for the
-fine-tuned model, which learns a distilled policy and not real underwriter judgment.
+It recommends with the shared policy in policy.py. The fine-tuned model learns that same
+distilled policy, not real underwriter judgment.
 """
 
 import json
@@ -9,18 +9,16 @@ import re
 from typing import Any
 
 from app.agent.extraction import EXTRACTION_SCHEMA_NAME
+from app.agent.policy import classify, score_average
 from app.agent.reasoner import REASONER_SCHEMA_NAME, ModelError
-from app.models.contract import ApplicantFields
+from app.models.contract import ApplicantFields, Recommendation
 
-# Policy thresholds for the fake reasoner (ratios and scores, no currency amounts).
-DECLINE_PAYMENT_TO_INCOME = 0.50
-BORDERLINE_PAYMENT_TO_INCOME = 0.35
-DECLINE_LOAN_TO_INCOME = 8.0
-BORDERLINE_LOAN_TO_INCOME = 5.0
-DECLINE_EXT_SCORE = 0.25
-BORDERLINE_EXT_SCORE = 0.40
 BASE_CONFIDENCE = 0.90
 CONFIDENCE_PENALTY_PER_MISSING_SCORE = 0.10
+REFER_CONFIDENCE = 0.60
+NO_SCORES_CONFIDENCE = 0.40
+DECLINE_CONFIDENCE = 0.85
+SCORE_KEYS = ("ext_source_1", "ext_source_2", "ext_source_3")
 
 _ANNUAL_INCOME_PATTERN = re.compile(
     r"annual\s+(?:gross\s+|net\s+)?(?:income|salary)\D{0,20}?([\d][\d,]*(?:\.\d+)?)", re.IGNORECASE
@@ -51,39 +49,39 @@ def _extract(payload: dict[str, Any]) -> dict[str, Any]:
 def _reason(payload: dict[str, Any]) -> dict[str, Any]:
     fields, metrics = payload["fields"], payload["metrics"]
     pti, lti = metrics["payment_to_income"], metrics["loan_to_income"]
-    scores = [
-        fields[k] for k in ("ext_source_1", "ext_source_2", "ext_source_3") if fields[k] is not None
-    ]
-    missing = 3 - len(scores)
-    average = sum(scores) / len(scores) if scores else None
+    average = score_average([fields[k] for k in SCORE_KEYS])
     reasons = [f"payment_to_income {pti:.2f}", f"loan_to_income {lti:.2f}"]
     if average is None:
         reasons.append("ext_source_1/2/3 are all missing, so no external score is available")
-        return _answer("refer", 0.4, reasons, "Can you provide an external credit score?")
+        return _answer(
+            Recommendation.REFER,
+            NO_SCORES_CONFIDENCE,
+            reasons,
+            "Can you provide an external credit score?",
+        )
+    missing = sum(fields[k] is None for k in SCORE_KEYS)
     reasons.append(f"average of available ext_source scores is {average:.2f}")
     if missing:
         reasons.append(f"{missing} of 3 ext_source scores are missing")
-    if pti > DECLINE_PAYMENT_TO_INCOME or lti > DECLINE_LOAN_TO_INCOME:
-        return _answer("decline", 0.85, reasons, None)
-    if average < DECLINE_EXT_SCORE:
-        return _answer("decline", 0.80, reasons, None)
-    borderline = (
-        pti > BORDERLINE_PAYMENT_TO_INCOME
-        or lti > BORDERLINE_LOAN_TO_INCOME
-        or average < BORDERLINE_EXT_SCORE
-    )
+    recommendation = classify(pti, lti, average)
+    if recommendation is Recommendation.DECLINE:
+        return _answer(recommendation, DECLINE_CONFIDENCE, reasons, None)
+    if recommendation is Recommendation.REFER:
+        reasons.append("metrics sit near the risk-band edge")
+        return _answer(recommendation, REFER_CONFIDENCE, reasons, None)
     confidence = BASE_CONFIDENCE - CONFIDENCE_PENALTY_PER_MISSING_SCORE * missing
-    if borderline:
-        return _answer("refer", 0.6, reasons + ["metrics sit near the risk-band edge"], None)
-    return _answer("approve", confidence, reasons, None)
+    return _answer(recommendation, confidence, reasons, None)
 
 
 def _answer(
-    recommendation: str, confidence: float, reasons: list[str], question: str | None
+    recommendation: Recommendation,
+    confidence: float,
+    reasons: list[str],
+    question: str | None,
 ) -> dict[str, Any]:
-    needs_human = recommendation != "approve"
+    needs_human = recommendation is not Recommendation.APPROVE
     return {
-        "recommendation": recommendation,
+        "recommendation": recommendation.value,
         "confidence": round(confidence, 2),
         "reasons": reasons,
         "needs_human": needs_human,

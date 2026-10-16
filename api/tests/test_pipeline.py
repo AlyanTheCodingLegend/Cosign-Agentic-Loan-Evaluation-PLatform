@@ -92,8 +92,8 @@ def test_income_mismatch_question_names_both_figures() -> None:
 
     question = store.get_application(application_id).human_question
     assert question is not None
-    assert "120,000.00" in question
-    assert "80,000.00" in question
+    assert "150,000.00" in question
+    assert "100,000.00" in question
 
 
 def test_reply_outside_needs_info_is_rejected() -> None:
