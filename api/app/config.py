@@ -12,9 +12,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # --- Router thresholds ---
 # PLACEHOLDER: max income_mismatch_pct (a fraction) before needs_info.
 INCOME_MISMATCH_TOLERANCE: float = 0.10
-# PLACEHOLDER: loan amount above which a human always reviews. Derive from a percentile of
-# AMT_CREDIT in the seed data, not a fixed currency amount.
-HIGH_LOAN_AMOUNT_CUTOFF: float = 1_000_000.0
+# 90th percentile of AMT_CREDIT in a 4,000-row stratified sample of application_train.csv
+# (seed/prepare_home_credit.py). Currency is unspecified, so this is a percentile, not a price.
+HIGH_LOAN_AMOUNT_CUTOFF: float = 1_129_500.0
 # PLACEHOLDER: reasoner confidence below which a human reviews.
 MIN_AUTO_CLEAR_CONFIDENCE: float = 0.80
 

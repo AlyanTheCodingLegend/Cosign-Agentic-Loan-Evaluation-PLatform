@@ -44,4 +44,4 @@ Table changes in `db/schema.sql` the web app should know about: `applications.in
 - Documents are accepted as text. PDF and image upload with OCR is not built.
 - Protected attributes are dropped from the form and from prompts, but document text is passed to the extraction model as written, so a document that mentions age or gender reaches that one call. The extraction output is filtered to the allowed fields, and the reasoner never sees document text.
 - Auto-cleared applications stay in `auto_cleared`; nothing moves them to `decided` unless a reviewer acts.
-- `HIGH_LOAN_AMOUNT_CUTOFF` is a placeholder until `api/seed/prepare_home_credit.py` has been run on `application_train.csv` to read off the percentile.
+- Real Home Credit rows give a median payment-to-income of about 1.95 (p90 3.65) with the specified formula, so the fake model's ratio cutoffs, which suit the demo applicants, would decline most real rows. The fine-tune needs percentile-based labels.

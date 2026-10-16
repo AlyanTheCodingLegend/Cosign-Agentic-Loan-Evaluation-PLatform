@@ -42,5 +42,5 @@ Thumbs.db
 .idea/
 
 # Home Credit data and sampled output
-seed/home_credit_sample.jsonl
+api/seed/home_credit_sample.jsonl
 *.csv
