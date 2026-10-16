@@ -32,11 +32,13 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=_ENV_FILE, extra="ignore")
 
-    model_base_url: str
-    model_name: str
-    model_api_key: SecretStr
-    supabase_url: str
-    supabase_key: SecretStr
+    # True runs on the in-memory store and the rule-based fake model, with no credentials.
+    use_fakes: bool = False
+    model_base_url: str = ""
+    model_name: str = ""
+    model_api_key: SecretStr = SecretStr("")
+    supabase_url: str = ""
+    supabase_key: SecretStr = SecretStr("")
 
 
 @lru_cache
