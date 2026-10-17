@@ -9,13 +9,21 @@ Uses only the standard library. Settings come from environment variables:
     PORT            port to listen on (default: 8000)
     CONTEXT_SIZE    total context tokens shared by all slots (default: 4096)
     PARALLEL        simultaneous requests (default: 2)
+    THREADS         CPU threads (default: the container's CPU limit)
+
+After the server is up it sends one tiny request with the app's system prompt
+(system_prompt.txt) so that long fixed prefix is cached, and real requests stay fast.
 """
 
+import json
 import os
 import shutil
 import subprocess
 import sys
 import tarfile
+import threading
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -25,6 +33,9 @@ LLAMA_URL = (
     f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_TAG}/"
     f"llama-{LLAMA_TAG}-bin-ubuntu-x64.tar.gz"
 )
+CGROUP_CPU_MAX = Path("/sys/fs/cgroup/cpu.max")
+SYSTEM_PROMPT_FILE = Path(__file__).resolve().parent / "system_prompt.txt"
+READY_TIMEOUT_SECONDS = 600
 CHUNK_BYTES = 1024 * 1024
 PROGRESS_EVERY_BYTES = 100 * CHUNK_BYTES
 
@@ -64,6 +75,19 @@ def install_llama_server() -> Path:
     return binary
 
 
+def cpu_limit() -> int:
+    """Return the CPUs this container may use: THREADS, else the cgroup quota, else all cores."""
+    if os.environ.get("THREADS"):
+        return int(os.environ["THREADS"])
+    try:
+        quota, period = CGROUP_CPU_MAX.read_text().split()
+        if quota != "max":
+            return max(1, round(int(quota) / int(period)))
+    except (OSError, ValueError):
+        pass
+    return os.cpu_count() or 4
+
+
 def build_command(binary: Path, model: Path) -> list[str]:
     """Return the llama-server command line."""
     return [
@@ -74,9 +98,44 @@ def build_command(binary: Path, model: Path) -> list[str]:
         "--port", os.environ.get("PORT", "8000"),
         "-c", os.environ.get("CONTEXT_SIZE", "4096"),
         "--parallel", os.environ.get("PARALLEL", "2"),
-        "-t", str(os.cpu_count() or 4),
+        "-t", str(cpu_limit()),
         "--chat-template", "chatml",
     ]  # fmt: skip
+
+
+def warm_up(port: str) -> None:
+    """Wait until the server is ready, then cache the app's system prompt with a 1-token request."""
+    base = f"http://127.0.0.1:{port}"
+    deadline = time.time() + READY_TIMEOUT_SECONDS
+    while time.time() < deadline:
+        try:
+            urllib.request.urlopen(f"{base}/health", timeout=5)
+            break
+        except (urllib.error.URLError, OSError):
+            time.sleep(2)
+    else:
+        print("warm-up skipped: server never became ready", flush=True)
+        return
+    body = json.dumps(
+        {
+            "model": os.environ.get("MODEL_ALIAS", "cosign"),
+            "max_tokens": 1,
+            "temperature": 0,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT_FILE.read_text(encoding="utf-8")},
+                {"role": "user", "content": "warm-up"},
+            ],
+        }
+    ).encode()
+    request = urllib.request.Request(
+        f"{base}/v1/chat/completions", body, {"content-type": "application/json"}
+    )
+    started = time.time()
+    try:
+        urllib.request.urlopen(request, timeout=600).read()
+        print(f"warm-up done in {time.time() - started:.0f}s", flush=True)
+    except (urllib.error.URLError, OSError) as exc:
+        print(f"warm-up failed: {exc}", flush=True)
 
 
 def main() -> int:
@@ -91,8 +150,13 @@ def main() -> int:
     download(model_url, model)
     command = build_command(binary, model)
     print("starting:", " ".join(command), flush=True)
-    env = {**os.environ, "LD_LIBRARY_PATH": f"{binary.parent}:{os.environ.get('LD_LIBRARY_PATH', '')}"}
-    return subprocess.call(command, env=env)
+    env = {
+        **os.environ,
+        "LD_LIBRARY_PATH": f"{binary.parent}:{os.environ.get('LD_LIBRARY_PATH', '')}",
+    }
+    server = subprocess.Popen(command, env=env)
+    threading.Thread(target=warm_up, args=(os.environ.get("PORT", "8000"),), daemon=True).start()
+    return server.wait()
 
 
 if __name__ == "__main__":
