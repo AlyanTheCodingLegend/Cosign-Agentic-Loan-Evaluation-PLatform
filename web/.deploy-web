@@ -1,0 +1,2 @@
+Marker commit so this service builds from its own unique commit.
+See "Deploy one service per commit" in README.md.
