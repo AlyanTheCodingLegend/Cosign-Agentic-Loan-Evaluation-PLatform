@@ -39,6 +39,20 @@ All three endpoints return immediately; progress shows up in Supabase realtime.
 
 Table changes in `db/schema.sql` the web app should know about: `applications.input`, `human_question` (shown to the applicant while `needs_info`), `final_decision`, `decision_reason`, `decided_by`, and `override_log.reviewer_id`.
 
+## Run everything locally (demo)
+
+Three processes, all on one machine. The database is the hosted Supabase project from `.env`.
+
+1. **Model.** Download a llama.cpp build for your OS from https://github.com/ggml-org/llama.cpp/releases (on Windows, the `win-vulkan-x64` zip works on any GPU) and run it on the fine-tuned `.gguf`:
+   ```
+   llama-server -m Qwen2.5-3B-Instruct.Q4_K_M.gguf --alias cosign --host 127.0.0.1 --port 8081 -c 4096 --parallel 2 -ngl 99 --chat-template chatml
+   ```
+   Drop `-ngl 99` to run on CPU. Check it with `curl http://127.0.0.1:8081/health`.
+2. **API.** In `.env` set `USE_FAKES=false`, `MODEL_BASE_URL=http://127.0.0.1:8081/v1`, `MODEL_NAME=cosign`, `MODEL_API_KEY=local`, `CORS_ORIGINS=http://localhost:3000`, plus the Supabase values. Then from `api/` with the venv active: `uvicorn app.main:app --port 8000`.
+3. **Web.** In `.env` set `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000` and the two `NEXT_PUBLIC_SUPABASE_*` values. Then from `web/`: `npm run dev`. Open http://localhost:3000.
+
+With a GTX 1060 the model answers in about 2 seconds once warm. The first request after startup is slower.
+
 ## Deployment checklist
 
 Target platform: Alternate Clouds (https://clouds.alternatefutures.ai, docs at https://docs.alternatefutures.ai). It deploys container images with the `acc` CLI, gives each service an automatic `https://<slug>-app.alternatefutures.ai` URL, and has a $5 trial credit. It does not build from a Dockerfile or compose file for Docker services, so the API image is built and pushed to a registry first. `docker-compose.yml` is for running the API locally only.
