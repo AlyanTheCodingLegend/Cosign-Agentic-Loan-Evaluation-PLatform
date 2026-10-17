@@ -53,7 +53,7 @@ Target platform: Alternate Clouds (https://clouds.alternatefutures.ai, docs at h
 - [ ] Download the best checkpoint or `final_adapter` from Kaggle and check `eval_results.json`: `valid_json_rate` near 1.0 and `policy_agreement` above 0.9.
 - [ ] Run the export notebook (`ml/export_gguf.py`) and download the `.gguf` and `Modelfile` from its output.
 - [ ] Serve it with Ollama: `ollama create cosign -f Modelfile`, then `ollama serve`. Test with `curl http://localhost:11434/v1/chat/completions`.
-- [ ] If the API runs on the platform and the model on your laptop, expose the model over HTTPS (Cloudflare tunnel or Tailscale Funnel) and use that URL. The platform also supports GPU services (`--gpu`, `acc regions --gpu <model>`), but that needs an Ollama image with the `.gguf` baked in.
+- [ ] Deploy the model as its own GPU service on the platform: bake the `.gguf` into an Ollama image and push it, as described in "Serve the model on Alternate Clouds" in `ml/README.md`. To test locally first, run `ollama create cosign -f Modelfile` and point `MODEL_BASE_URL` at `http://localhost:11434/v1`.
 - [ ] Fallback: point the three model variables at any OpenAI-compatible API model. The prompt is the same.
 - [ ] The fine-tune was trained only on the reasoner task. Extraction uses the same model variables, so with the fine-tune it may fail to return fields and the API falls back to form values only; income-mismatch checks then do not run. Use a prompted model if documents matter in the demo.
 
