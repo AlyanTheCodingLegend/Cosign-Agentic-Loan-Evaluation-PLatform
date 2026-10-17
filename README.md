@@ -41,39 +41,47 @@ Table changes in `db/schema.sql` the web app should know about: `applications.in
 
 ## Deployment checklist
 
-Everything runs on one host: the API, the web app and (optionally) the model server. Supabase is hosted.
+Target platform: Alternate Clouds (https://clouds.alternatefutures.ai, docs at https://docs.alternatefutures.ai). It deploys container images with the `acc` CLI, gives each service an automatic `https://<slug>-app.alternatefutures.ai` URL, and has a $5 trial credit. It does not build from a Dockerfile or compose file for Docker services, so the API image is built and pushed to a registry first. `docker-compose.yml` is for running the API locally only.
 
 **1. Database (done once)**
 - [ ] Run `db/schema.sql` in the Supabase SQL editor.
 - [ ] Confirm `applications` is in the `supabase_realtime` publication.
-- [ ] Rotate the service role key if it was ever pasted into a chat or committed, then use the new one below.
+- [ ] Add a read-only row-level-security policy for the anon role on `applications`, so the web app can read the queue.
+- [ ] Rotate the service role key if it was ever pasted into a chat or committed.
 
 **2. Model**
-- [ ] Download the best checkpoint or `final_adapter` from Kaggle (or from your Hugging Face repo) and check `eval_results.json`: `valid_json_rate` near 1.0 and `policy_agreement` above 0.9.
-- [ ] Export it: in the Kaggle session run `ml/export_gguf.py`, then download the `.gguf` file and `Modelfile` from `/kaggle/working/gguf/`.
-- [ ] Serve it with Ollama on the laptop or host: `ollama create cosign -f Modelfile`, then `ollama serve`. Test with `curl http://localhost:11434/v1/chat/completions`.
-- [ ] Expose it over HTTPS if the API is on another machine (for example a Cloudflare tunnel or Tailscale Funnel). Note the public URL.
-- [ ] Fallback if the fine-tune is not ready or misbehaves: point the three model variables at any OpenAI-compatible API model instead. The prompt is the same, so nothing else changes.
+- [ ] Download the best checkpoint or `final_adapter` from Kaggle and check `eval_results.json`: `valid_json_rate` near 1.0 and `policy_agreement` above 0.9.
+- [ ] Run the export notebook (`ml/export_gguf.py`) and download the `.gguf` and `Modelfile` from its output.
+- [ ] Serve it with Ollama: `ollama create cosign -f Modelfile`, then `ollama serve`. Test with `curl http://localhost:11434/v1/chat/completions`.
+- [ ] If the API runs on the platform and the model on your laptop, expose the model over HTTPS (Cloudflare tunnel or Tailscale Funnel) and use that URL. The platform also supports GPU services (`--gpu`, `acc regions --gpu <model>`), but that needs an Ollama image with the `.gguf` baked in.
+- [ ] Fallback: point the three model variables at any OpenAI-compatible API model. The prompt is the same.
 - [ ] The fine-tune was trained only on the reasoner task. Extraction uses the same model variables, so with the fine-tune it may fail to return fields and the API falls back to form values only; income-mismatch checks then do not run. Use a prompted model if documents matter in the demo.
 
-**3. API environment** (in `.env` at the repo root; it is git-ignored and not copied into the image)
-- [ ] `USE_FAKES=false`
-- [ ] `SUPABASE_URL` and `SUPABASE_KEY` (service role key; keep it server-side only)
-- [ ] `MODEL_BASE_URL` (ends in `/v1`), `MODEL_NAME` (for example `cosign`) and `MODEL_API_KEY` (any non-empty text for Ollama)
-- [ ] `CORS_ORIGINS` set to the web app's public origin, for example `https://app.example.com` (comma separated for more than one)
+**3. Build and publish the API image**
+- [ ] Push a version tag: `git tag v0.1.0 && git push origin v0.1.0`. The workflow in `.github/workflows/api-image.yml` runs lint, types and tests, then publishes `ghcr.io/<owner>/cosign-api:0.1.0`.
+- [ ] Make the package public (GitHub -> Packages -> cosign-api -> Package settings -> Change visibility). The platform cannot pull private images. The image contains no secrets: `.env` is excluded and every setting comes from environment variables.
+- [ ] Always deploy a versioned tag. The platform refuses `latest` and `main`.
+- [ ] To build by hand instead: `docker build -t ghcr.io/<owner>/cosign-api:0.1.0 api` and `docker push` it.
 
-**4. Run the API**
-- [ ] `docker compose up --build -d` from the repo root.
-- [ ] `curl http://localhost:8000/health` returns `{"status":"ok"}`.
-- [ ] From `api/` with the venv active, run `python scripts/smoke_supabase.py`. It checks the database path with the fake model.
+**4. Deploy on Alternate Clouds**
+- [ ] `npm install -g @alternatefutures/acc`, then `acc login` and `acc projects create --name cosign`.
+- [ ] Create the service. Replace the values; `MODEL_BASE_URL` ends in `/v1`:
+  ```
+  acc services create --kind docker --image ghcr.io/<owner>/cosign-api:0.1.0 --port 8000 --name cosign-api     --env USE_FAKES=false     --env SUPABASE_URL=https://<project>.supabase.co     --env SUPABASE_KEY=<service role key>     --env MODEL_BASE_URL=<model url>/v1 --env MODEL_NAME=cosign --env MODEL_API_KEY=ollama     --env CORS_ORIGINS=https://<web-slug>-app.alternatefutures.ai     -y
+  ```
+- [ ] Add `--confidential` to run on a TEE. Services run on third-party providers, who start the container with your environment variables, so the Supabase service role key is visible to them. Use `--confidential` if your plan allows it, and rotate the key after the demo.
+- [ ] `acc services list` shows the status and public URL. `acc services logs cosign-api --tail 100` shows logs.
+- [ ] `curl https://<slug>-app.alternatefutures.ai/health` returns `{"status":"ok"}`.
+- [ ] To change a variable: `acc services env set cosign-api KEY VALUE`, then `acc services deploy`. To ship a new version: `acc services deploy --image ghcr.io/<owner>/cosign-api:0.1.1`.
 - [ ] Submit one demo applicant from `api/seed/demo_applicants.json` to `POST /applications` and watch it move through the statuses in Supabase.
-- [ ] Put HTTPS in front of port 8000 (reverse proxy or the host's own TLS) so the browser can call it from an HTTPS page.
+- [ ] If a deployment does not start within about 25 minutes the platform marks it failed and does not charge. Check `acc deployments --service <id> --status failed` and `acc regions`, and try another region.
 
 **5. Web app** (friend)
-- [ ] Set its API base URL and the Supabase URL and anon key. Never give it the service role key.
-- [ ] Add the `applications` table to Supabase row-level security policies for the anon role (read only), since the queue reads directly from Supabase.
+- [ ] Deploy it the same way as an image. Set its API base URL to the API's public URL and use the Supabase URL and anon key. Never give it the service role key.
+- [ ] Put the web app's public origin in the API's `CORS_ORIGINS`, then redeploy the API.
 
 **6. Before the demo**
+- [ ] Make sure the account has credit for at least one hour of running cost; the platform will not place a deployment without it.
 - [ ] Delete test rows from `applications` if you want a clean queue. The audit and override logs are append-only by design and cannot be cleared.
 - [ ] Run each demo applicant once and confirm the expected status.
 - [ ] Have the prompted-model fallback values ready in case the model server is down.

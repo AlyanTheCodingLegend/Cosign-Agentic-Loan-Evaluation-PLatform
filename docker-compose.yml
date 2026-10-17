@@ -1,4 +1,5 @@
-# Runs the API from the repo root: `docker compose up --build`.
+# Local only: runs the API from the repo root with `docker compose up --build`. The deployment
+# platform takes a published image instead; see "Deployment checklist" in README.md.
 # Settings come from .env at the repo root (see .env.example); the file is not baked into the image.
 services:
   api:
