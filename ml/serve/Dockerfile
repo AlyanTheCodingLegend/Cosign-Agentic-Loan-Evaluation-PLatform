@@ -7,7 +7,8 @@ WORKDIR /models
 COPY *.gguf ./
 COPY Modelfile ./
 COPY entrypoint.sh /entrypoint.sh
-RUN sed -i 's/$//' /entrypoint.sh && chmod +x /entrypoint.sh
+# Strip Windows line endings, which would break the script's shebang on Linux.
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 ENV OLLAMA_HOST=0.0.0.0:11434
 EXPOSE 11434
