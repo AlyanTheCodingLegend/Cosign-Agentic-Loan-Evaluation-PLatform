@@ -45,13 +45,48 @@ export interface ReasonerOutput {
   human_question: string | null;
 }
 
+export type DocumentKind = "salary_slip" | "bank_statement" | "other";
+
+/** One supporting document, already converted to text. */
+export interface Document {
+  name: string;
+  kind: DocumentKind;
+  text: string;
+}
+
+/** What the applicant typed into the form. Every number may be left out. */
+export interface ApplicationForm {
+  annual_income: number | null;
+  loan_amount: number | null;
+  annuity: number | null;
+  goods_price: number | null;
+  years_employed: number | null;
+  ext_source_1: number | null;
+  ext_source_2: number | null;
+  ext_source_3: number | null;
+}
+
+/** The raw submission (ApplicationInput), stored in applications.input. */
+export interface ApplicationInput {
+  form: ApplicationForm;
+  documents: Document[];
+  replies: string[];
+  corrections: Partial<Record<keyof ApplicantFields, number>>;
+}
+
 /** A row of the applications table. */
 export interface Application {
   id: string;
   status: Status;
+  input: ApplicationInput;
   fields: ApplicantFields | null;
   metrics: Metrics | null;
   agent_output: ReasonerOutput | null;
+  /** Question for the applicant while status is needs_info; null otherwise. */
+  human_question: string | null;
+  final_decision: HumanDecision | null;
+  decision_reason: string | null;
+  decided_by: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -66,35 +101,36 @@ export interface AuditEvent {
   created_at: string;
 }
 
-// --- Request bodies. ASSUMED shapes: the API routes are not implemented yet. ---
+// --- Request and response bodies, mirroring api/app/models/application.py and routes. ---
 
 /** Body for POST /applications. Never carries protected attributes (hard rule 4). */
 export interface CreateApplicationRequest {
-  annual_income: number | null;
-  document_income: number | null;
-  loan_amount: number | null;
-  annuity: number | null;
-  goods_price: number | null;
-  years_employed: number | null;
+  form: ApplicationForm;
+  documents: Document[];
 }
 
-export interface CreateApplicationResponse {
+/** Returned with 202 by POST /applications and POST /applications/{id}/reply. */
+export interface ApplicationAccepted {
   id: string;
   status: Status;
 }
 
-/** Body for POST /applications/{id}/reply. */
+/** Body for POST /applications/{id}/reply. Corrected values win over extracted ones. */
 export interface ReplyRequest {
   answer: string;
+  corrections: Partial<Record<keyof ApplicantFields, number>>;
 }
+
+export type DecisionAction = "approve" | "reject" | "override";
 
 /**
  * Body for POST /applications/{id}/decision.
- * `override` is true when the reviewer's decision goes against the agent's recommendation.
- * A reason is required for reject and for override (hard rule 6).
+ * approve/reject must agree with the agent; going against it is an override with final_decision.
+ * A reason is required for reject and override (hard rule 6).
  */
 export interface DecisionRequest {
-  decision: HumanDecision;
-  override: boolean;
+  reviewer_id: string;
+  action: DecisionAction;
+  final_decision: HumanDecision | null;
   reason: string | null;
 }

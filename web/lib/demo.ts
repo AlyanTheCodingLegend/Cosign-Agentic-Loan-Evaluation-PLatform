@@ -1,13 +1,18 @@
 // In-memory demo data, used only when Supabase or the API URL is not configured.
-// Seeds mirror the five demo paths in the project plan. The demo never computes metrics or
-// recommendations: new cases fall back to `refer` for a human, as hard rule 7 does.
+// Rows, events and request rules mirror api/app (pipeline.py, routes). The demo never extracts,
+// computes metrics or recommends: new cases fall back to `refer` for a human, as hard rule 7 does.
 
 import type { DataSource } from "./data";
+import { contradictsAgent } from "./decision";
+import { ApiError } from "./errors";
 import {
   REQUIRED_FIELDS,
   type ApplicantFields,
   type Application,
+  type ApplicationForm,
   type AuditEvent,
+  type Document,
+  type HumanDecision,
   type ReasonerOutput,
   type Status,
 } from "./types";
@@ -15,24 +20,28 @@ import {
 const MINUTE = 60_000;
 const ANALYZE_DELAY_MS = 1200;
 const ROUTE_DELAY_MS = 2400;
+const HTTP_CONFLICT = 409;
+const HTTP_NOT_FOUND = 404;
+const HTTP_UNPROCESSABLE = 422;
 
 let nextEventId = 1;
 const applications = new Map<string, Application>();
 const events = new Map<string, AuditEvent[]>();
 const listeners = new Set<() => void>();
 
-function emptyFields(): ApplicantFields {
-  return {
-    annual_income: null,
-    document_income: null,
-    loan_amount: null,
-    annuity: null,
-    goods_price: null,
-    years_employed: null,
-    ext_source_1: null,
-    ext_source_2: null,
-    ext_source_3: null,
-  };
+const EMPTY_FORM: ApplicationForm = {
+  annual_income: null,
+  loan_amount: null,
+  annuity: null,
+  goods_price: null,
+  years_employed: null,
+  ext_source_1: null,
+  ext_source_2: null,
+  ext_source_3: null,
+};
+
+function fieldsFrom(form: ApplicationForm, documentIncome: number | null = null): ApplicantFields {
+  return { ...form, document_income: documentIncome };
 }
 
 function iso(msAgo: number): string {
@@ -43,7 +52,7 @@ function log(
   appId: string,
   actor: string,
   event_type: string,
-  payload: Record<string, unknown>,
+  payload: Record<string, unknown> = {},
   at = new Date().toISOString(),
 ): void {
   const list = events.get(appId) ?? [];
@@ -55,19 +64,9 @@ function notify(): void {
   listeners.forEach((fn) => fn());
 }
 
-function setStatus(
-  app: Application,
-  status: Status,
-  actor = "agent",
-  extra: Record<string, unknown> = {},
-): void {
-  log(app.id, actor, "status_changed", {
-    from: app.status,
-    to: status,
-    ...extra,
-  });
-  app.status = status;
-  app.updated_at = new Date().toISOString();
+function setStatus(app: Application, status: Status, actor = "system", columns: Partial<Application> = {}): void {
+  log(app.id, actor, "status_changed", { from: app.status, to: status });
+  Object.assign(app, columns, { status, updated_at: new Date().toISOString() });
   notify();
 }
 
@@ -75,11 +74,12 @@ interface Seed {
   id: string;
   minutesAgo: number;
   status: Status;
-  fields: Partial<ApplicantFields>;
+  form: Partial<ApplicationForm>;
+  documentIncome?: number;
   metrics: Application["metrics"];
   output: ReasonerOutput | null;
   question?: string;
-  decision?: { decision: "approve" | "reject"; reason: string; override: boolean };
+  decision?: { final: HumanDecision; reason: string; override: boolean };
 }
 
 const SEEDS: Seed[] = [
@@ -87,16 +87,13 @@ const SEEDS: Seed[] = [
     id: "a1f3c2d4-0001-4c1a-9f10-5a1b2c3d4e01",
     minutesAgo: 42,
     status: "auto_cleared",
-    fields: { annual_income: 540_000, loan_amount: 300_000, annuity: 9_000, goods_price: 280_000, years_employed: 6.5, ext_source_2: 0.71, ext_source_3: 0.66 },
-    metrics: { loan_to_income: 0.56, payment_to_income: 0.2, income_mismatch_pct: null },
+    form: { annual_income: 150_000, loan_amount: 450_000, annuity: 15_000, goods_price: 400_000, years_employed: 6, ext_source_1: 0.72, ext_source_2: 0.68, ext_source_3: 0.7 },
+    documentIncome: 150_000,
+    metrics: { loan_to_income: 3, payment_to_income: 1.2, income_mismatch_pct: 0 },
     output: {
       recommendation: "approve",
-      confidence: 0.93,
-      reasons: [
-        "loan_to_income of 0.56 is well inside policy",
-        "payment_to_income of 20% leaves comfortable headroom",
-        "years_employed of 6.5 shows stable income",
-      ],
+      confidence: 0.9,
+      reasons: ["payment_to_income 1.20 is below the 2.77 refer limit", "loan_to_income 3.00 is below the 5.23 refer limit", "average external score 0.70 is healthy"],
       needs_human: false,
       human_question: null,
     },
@@ -105,46 +102,44 @@ const SEEDS: Seed[] = [
     id: "b2e4d3c5-0002-4d2b-8e21-6b2c3d4e5f02",
     minutesAgo: 31,
     status: "needs_info",
-    fields: { annual_income: 900_000, document_income: 720_000, loan_amount: 650_000, annuity: 21_000, goods_price: 600_000, years_employed: 3.2, ext_source_2: 0.58 },
-    metrics: { loan_to_income: 0.72, payment_to_income: 0.28, income_mismatch_pct: 0.25 },
+    form: { annual_income: 150_000, loan_amount: 300_000, annuity: 12_000, goods_price: 280_000, years_employed: 3.2, ext_source_1: 0.6, ext_source_2: 0.65, ext_source_3: 0.62 },
+    documentIncome: 100_000,
+    metrics: { loan_to_income: 2, payment_to_income: 0.96, income_mismatch_pct: 0.5 },
     output: {
-      recommendation: "refer",
-      confidence: 0.61,
-      reasons: ["income_mismatch_pct of 25% between form and bank statement", "payment_to_income of 28% depends on which income is correct"],
-      needs_human: true,
-      human_question: "Which income figure is correct?",
+      recommendation: "approve",
+      confidence: 0.9,
+      reasons: ["payment_to_income 0.96 is low", "loan_to_income 2.00 is low", "average external score 0.62 is healthy"],
+      needs_human: false,
+      human_question: null,
     },
-    question:
-      "The income on your form (900,000.00) differs from the income on your document (720,000.00). Which figure is correct?",
+    question: "The income on your form (150,000.00) differs from the income on your document (100,000.00). Which figure is correct?",
   },
   {
     id: "c3f5e4d6-0003-4e3c-9d32-7c3d4e5f6a03",
     minutesAgo: 24,
     status: "pending_review",
-    fields: { annual_income: 420_000, document_income: 410_000, loan_amount: 780_000, annuity: 14_500, goods_price: 700_000, years_employed: 1.1, ext_source_2: 0.44 },
-    metrics: { loan_to_income: 1.86, payment_to_income: 0.41, income_mismatch_pct: 0.024 },
+    form: { annual_income: 120_000, loan_amount: 500_000, annuity: 30_000, goods_price: 450_000, years_employed: 1.1, ext_source_2: 0.42 },
+    documentIncome: 118_000,
+    metrics: { loan_to_income: 4.17, payment_to_income: 3, income_mismatch_pct: 0.017 },
     output: {
       recommendation: "refer",
-      confidence: 0.57,
-      reasons: [
-        "payment_to_income of 41% is close to the policy ceiling",
-        "years_employed of 1.1 is short",
-        "ext_source_1 and ext_source_3 are missing, so bureau evidence is thin",
-      ],
+      confidence: 0.6,
+      reasons: ["payment_to_income 3.00 is above the 2.77 refer limit", "average external score 0.42 is in the refer band", "ext_source_1 and ext_source_3 are missing"],
       needs_human: true,
-      human_question: "Is there a guarantor or additional income that offsets the short employment history?",
+      human_question: "Is there a guarantor or additional income that offsets the high payment-to-income?",
     },
   },
   {
     id: "d4a6f5e7-0004-4f4d-8c43-8d4e5f6a7b04",
     minutesAgo: 17,
     status: "pending_review",
-    fields: { annual_income: 3_600_000, document_income: 3_550_000, loan_amount: 2_400_000, annuity: 62_000, goods_price: 2_300_000, years_employed: 11, ext_source_1: 0.74, ext_source_2: 0.79, ext_source_3: 0.7 },
-    metrics: { loan_to_income: 0.67, payment_to_income: 0.21, income_mismatch_pct: 0.014 },
+    form: { annual_income: 600_000, loan_amount: 1_500_000, annuity: 45_000, goods_price: 1_400_000, years_employed: 11, ext_source_1: 0.74, ext_source_2: 0.79, ext_source_3: 0.7 },
+    documentIncome: 600_000,
+    metrics: { loan_to_income: 2.5, payment_to_income: 0.9, income_mismatch_pct: 0 },
     output: {
       recommendation: "approve",
       confidence: 0.9,
-      reasons: ["loan_to_income of 0.67 is within policy", "payment_to_income of 21% is affordable", "ext_source scores are all above 0.7"],
+      reasons: ["payment_to_income 0.90 is low", "loan_to_income 2.50 is below the refer limit", "average external score 0.74 is strong"],
       needs_human: false,
       human_question: null,
     },
@@ -153,21 +148,22 @@ const SEEDS: Seed[] = [
     id: "e5b7a6f8-0005-4a5e-9b54-9e5f6a7b8c05",
     minutesAgo: 9,
     status: "needs_info",
-    fields: { annual_income: 610_000, loan_amount: 450_000, years_employed: 2 },
+    form: { annual_income: 200_000, loan_amount: 350_000, years_employed: 2 },
     metrics: null,
     output: null,
-    question: "We need a few more details before we can assess your application: annuity, goods_price.",
+    question: "Please provide the following missing information: annuity, goods_price.",
   },
   {
     id: "f6c8b7a9-0006-4b6f-8a65-af6a7b8c9d06",
     minutesAgo: 5,
     status: "pending_review",
-    fields: { annual_income: 300_000, document_income: 295_000, loan_amount: 1_150_000, annuity: 13_800, goods_price: 1_000_000, years_employed: 0.4, ext_source_2: 0.21 },
-    metrics: { loan_to_income: 3.83, payment_to_income: 0.55, income_mismatch_pct: 0.017 },
+    form: { annual_income: 90_000, loan_amount: 600_000, annuity: 30_000, goods_price: 550_000, years_employed: 0.4, ext_source_2: 0.3 },
+    documentIncome: 88_000,
+    metrics: { loan_to_income: 6.67, payment_to_income: 4, income_mismatch_pct: 0.023 },
     output: {
       recommendation: "decline",
-      confidence: 0.84,
-      reasons: ["payment_to_income of 55% exceeds the policy ceiling", "loan_to_income of 3.83 is high", "ext_source_2 of 0.21 is weak"],
+      confidence: 0.85,
+      reasons: ["payment_to_income 4.00 is above the 3.65 decline limit", "average external score 0.30 is in the decline band"],
       needs_human: true,
       human_question: "Confirm decline: affordability fails on payment_to_income.",
     },
@@ -176,55 +172,70 @@ const SEEDS: Seed[] = [
     id: "a7d9c8ba-0007-4c7a-9b76-b07b8c9d0e07",
     minutesAgo: 75,
     status: "decided",
-    fields: { annual_income: 480_000, document_income: 470_000, loan_amount: 520_000, annuity: 12_600, goods_price: 500_000, years_employed: 4, ext_source_2: 0.52 },
-    metrics: { loan_to_income: 1.08, payment_to_income: 0.315, income_mismatch_pct: 0.021 },
+    form: { annual_income: 160_000, loan_amount: 500_000, annuity: 50_000, goods_price: 480_000, years_employed: 4, ext_source_2: 0.52 },
+    documentIncome: 158_000,
+    metrics: { loan_to_income: 3.13, payment_to_income: 3.75, income_mismatch_pct: 0.013 },
     output: {
       recommendation: "decline",
-      confidence: 0.66,
-      reasons: ["payment_to_income of 31.5% is above the comfort band", "ext_source_1 and ext_source_3 are missing"],
+      confidence: 0.85,
+      reasons: ["payment_to_income 3.75 is above the 3.65 decline limit"],
       needs_human: true,
       human_question: "Is the payment affordable given the applicant's stable employment?",
     },
     decision: {
-      decision: "approve",
+      final: "approve",
       override: true,
       reason: "Four years with the same employer and a matching bank statement; payment is affordable.",
     },
   },
 ];
 
+const DEMO_REVIEWER = "officer.demo";
+
 function seed(): void {
   for (const s of SEEDS) {
     const created = s.minutesAgo * MINUTE;
+    const form = { ...EMPTY_FORM, ...s.form };
+    const documents: Document[] =
+      s.documentIncome != null
+        ? [{ name: "bank_statement.txt", kind: "bank_statement", text: `Annual income: ${s.documentIncome.toLocaleString("en-US")}` }]
+        : [];
     const app: Application = {
       id: s.id,
       status: s.status,
-      fields: { ...emptyFields(), ...s.fields },
+      input: { form, documents, replies: [], corrections: {} },
+      fields: fieldsFrom(form, s.documentIncome ?? null),
       metrics: s.metrics,
       agent_output: s.output,
+      human_question: s.status === "needs_info" ? (s.question ?? null) : null,
+      final_decision: s.decision?.final ?? null,
+      decision_reason: s.decision?.reason ?? null,
+      decided_by: s.decision ? DEMO_REVIEWER : null,
       created_at: iso(created),
       updated_at: iso(created - 2 * MINUTE),
     };
     applications.set(app.id, app);
     log(app.id, "applicant", "application_submitted", {}, iso(created));
-    log(app.id, "agent", "status_changed", { from: "submitted", to: "analyzing" }, iso(created - 5_000));
-    log(app.id, "agent", "fields_extracted", {}, iso(created - 20_000));
-    if (s.metrics) log(app.id, "agent", "metrics_computed", { ...s.metrics }, iso(created - 22_000));
-    if (s.output) {
-      log(app.id, "agent", "reasoner_completed", {
-        recommendation: s.output.recommendation,
-        confidence: s.output.confidence,
-      }, iso(created - 60_000));
+    log(app.id, "system", "status_changed", { from: "submitted", to: "analyzing" }, iso(created - 5_000));
+    log(app.id, "system", "fields_extracted", {}, iso(created - 20_000));
+    if (!s.output) {
+      const missing = REQUIRED_FIELDS.filter((k) => form[k] == null);
+      log(app.id, "system", "missing_fields", { missing }, iso(created - 21_000));
+    } else {
+      log(app.id, "system", "recommendation", { metrics: s.metrics, output: s.output }, iso(created - 40_000));
+      const routed = s.status === "decided" ? "pending_review" : s.status;
+      log(app.id, "system", "routed", { status: routed, human_question: s.question ?? null }, iso(created - 41_000));
     }
     const routedTo = s.status === "decided" ? "pending_review" : s.status;
-    log(app.id, "router", "status_changed", {
-      from: "analyzing",
-      to: routedTo,
-      ...(s.question ? { human_question: s.question } : {}),
-    }, iso(created - 61_000));
+    log(app.id, "system", "status_changed", { from: "analyzing", to: routedTo }, iso(created - 42_000));
     if (s.decision) {
-      log(app.id, "reviewer", "decision_recorded", { ...s.decision }, iso(created - 20 * MINUTE));
-      log(app.id, "reviewer", "status_changed", { from: "pending_review", to: "decided" }, iso(created - 20 * MINUTE));
+      const at = iso(created - 20 * MINUTE);
+      log(app.id, DEMO_REVIEWER, "reviewer_decision", {
+        action: s.decision.override ? "override" : s.decision.final,
+        final_decision: s.decision.final,
+        reason: s.decision.reason,
+      }, at);
+      log(app.id, DEMO_REVIEWER, "status_changed", { from: "pending_review", to: "decided" }, at);
     }
   }
 }
@@ -243,8 +254,30 @@ function fallbackOutput(): ReasonerOutput {
 
 function mustGet(id: string): Application {
   const app = applications.get(id);
-  if (!app) throw new Error("Application not found");
+  if (!app) throw new ApiError("application not found", HTTP_NOT_FOUND);
   return app;
+}
+
+/** Stand-in for one pipeline run: completeness check, then refer to a human. */
+function runPipeline(app: Application): void {
+  setTimeout(() => setStatus(app, "analyzing"), ANALYZE_DELAY_MS);
+  setTimeout(() => {
+    const fields = { ...fieldsFrom(app.input.form), ...app.input.corrections };
+    log(app.id, "system", "fields_extracted", {});
+    const missing = REQUIRED_FIELDS.filter((k) => fields[k] == null);
+    if (missing.length) {
+      log(app.id, "system", "missing_fields", { missing });
+      setStatus(app, "needs_info", "system", {
+        fields,
+        human_question: `Please provide the following missing information: ${missing.join(", ")}.`,
+      });
+      return;
+    }
+    const output = fallbackOutput();
+    log(app.id, "system", "recommendation", { metrics: null, output });
+    log(app.id, "system", "routed", { status: "pending_review", human_question: null });
+    setStatus(app, "pending_review", "system", { fields, agent_output: output, human_question: null });
+  }, ROUTE_DELAY_MS);
 }
 
 export const demoSource: DataSource = {
@@ -275,52 +308,58 @@ export const demoSource: DataSource = {
     const app: Application = {
       id: crypto.randomUUID(),
       status: "submitted",
-      fields: { ...emptyFields(), ...body },
+      input: { form: body.form, documents: body.documents, replies: [], corrections: {} },
+      fields: null,
       metrics: null,
       agent_output: null,
+      human_question: null,
+      final_decision: null,
+      decision_reason: null,
+      decided_by: null,
       created_at: now,
       updated_at: now,
     };
     applications.set(app.id, app);
-    log(app.id, "applicant", "application_submitted", {});
+    log(app.id, "applicant", "application_submitted");
     notify();
-
-    setTimeout(() => setStatus(app, "analyzing"), ANALYZE_DELAY_MS);
-    setTimeout(() => {
-      const missing = REQUIRED_FIELDS.filter((name) => app.fields?.[name] == null);
-      if (missing.length) {
-        setStatus(app, "needs_info", "router", {
-          human_question: `We need a few more details before we can assess your application: ${missing.join(", ")}.`,
-        });
-        return;
-      }
-      app.agent_output = fallbackOutput();
-      setStatus(app, "pending_review", "router");
-    }, ROUTE_DELAY_MS);
-
+    runPipeline(app);
     return { id: app.id, status: app.status };
   },
 
   async reply(id, body) {
     const app = mustGet(id);
-    if (app.status !== "needs_info") throw new Error("This application is not waiting for information");
-    log(id, "applicant", "applicant_replied", { answer: body.answer });
-    setStatus(app, "analyzing");
-    setTimeout(() => {
-      app.agent_output ??= fallbackOutput();
-      setStatus(app, "pending_review", "router");
-    }, ROUTE_DELAY_MS - ANALYZE_DELAY_MS);
+    if (app.status !== "needs_info") {
+      throw new ApiError(`application is ${app.status}, not waiting for a reply`, HTTP_CONFLICT);
+    }
+    app.input = {
+      ...app.input,
+      replies: [...app.input.replies, body.answer],
+      corrections: { ...app.input.corrections, ...body.corrections },
+    };
+    log(id, "applicant", "applicant_replied", { corrected_fields: Object.keys(body.corrections).sort() });
+    notify();
+    runPipeline(app);
+    return { id: app.id, status: app.status };
   },
 
   async decide(id, body) {
     const app = mustGet(id);
     if (app.status !== "pending_review" && app.status !== "auto_cleared") {
-      throw new Error(`Cannot decide an application in status ${app.status}`);
+      throw new ApiError(`cannot decide an application that is ${app.status}`, HTTP_CONFLICT);
     }
-    if ((body.decision === "reject" || body.override) && !body.reason?.trim()) {
-      throw new Error("A reason is required to reject or override");
+    if (body.action !== "approve" && !body.reason?.trim()) {
+      throw new ApiError(`a reason is required for ${body.action}`, HTTP_UNPROCESSABLE);
     }
-    log(id, "reviewer", "decision_recorded", { ...body });
-    setStatus(app, "decided", "reviewer");
+    const recommendation = app.agent_output?.recommendation;
+    const final: HumanDecision = body.action === "override" && body.final_decision ? body.final_decision : body.action === "reject" ? "reject" : "approve";
+    if (body.action !== "override" && contradictsAgent(final, recommendation)) {
+      throw new ApiError(`${body.action} contradicts the agent's ${recommendation}; use override with a reason`, HTTP_CONFLICT);
+    }
+    log(id, body.reviewer_id, "reviewer_decision", { action: body.action, final_decision: final, reason: body.reason });
+    setStatus(app, "decided", body.reviewer_id, {
+      final_decision: final,
+      decision_reason: body.reason,
+      decided_by: body.reviewer_id,
+    });
   },
 };

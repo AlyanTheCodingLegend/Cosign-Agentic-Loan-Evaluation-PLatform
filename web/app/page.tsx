@@ -23,7 +23,7 @@ const FAQ = [
   },
   {
     q: "What information do you use?",
-    a: "Your income, the loan amount, the monthly installment, the price of what you are buying and, if you share it, your employment history and bank statement income. We never ask for or use gender, age or family status.",
+    a: "Your income, the loan amount, the loan annuity, the price of what you are buying and, if you share it, your employment history and bank statement income. We never ask for or use gender, age or family status.",
   },
   {
     q: "What happens if my numbers don't match?",
@@ -387,14 +387,14 @@ function ReasonsMock() {
     <div className="rounded-2xl bg-white p-6 shadow-xl shadow-brand-900/5">
       <div className="flex items-center justify-between">
         <p className="text-sm font-bold text-ink">Agent recommendation</p>
-        <span className="rounded-full bg-lavender-50 px-2.5 py-1 text-xs font-semibold text-lavender-700">Refer · 57%</span>
+        <span className="rounded-full bg-lavender-50 px-2.5 py-1 text-xs font-semibold text-lavender-700">Refer · 60%</span>
       </div>
       <div className="mt-3 h-1.5 rounded-full bg-brand-50">
-        <div className="h-full w-[57%] rounded-full bg-gradient-to-r from-peach-200 to-peach-400" />
+        <div className="h-full w-[60%] rounded-full bg-gradient-to-r from-peach-200 to-peach-400" />
       </div>
       <ul className="mt-5 space-y-2.5 text-sm text-ink">
-        <li className="border-l-2 border-brand-300 pl-3">payment_to_income of 41% is near the ceiling</li>
-        <li className="border-l-2 border-brand-300 pl-3">years_employed of 1.1 is short</li>
+        <li className="border-l-2 border-brand-300 pl-3">payment_to_income 3.00 is above the 2.77 refer limit</li>
+        <li className="border-l-2 border-brand-300 pl-3">average external score 0.42 is in the refer band</li>
         <li className="border-l-2 border-brand-300 pl-3">two external scores are missing</li>
       </ul>
     </div>
@@ -420,7 +420,7 @@ function QuestionMock() {
 
 function AuditMock() {
   const rows = [
-    { who: "agent", what: "Recommended decline at 66%", tone: "bg-brand-100 text-brand-700" },
+    { who: "agent", what: "Recommended decline at 85%", tone: "bg-brand-100 text-brand-700" },
     { who: "router", what: "Analyzing → Pending review", tone: "bg-lavender-100 text-lavender-700" },
     { who: "reviewer", what: "Approve (override)", tone: "bg-peach-100 text-peach-700" },
   ];

@@ -73,7 +73,7 @@ export function MetricTiles({ metrics }: { metrics: Metrics | null }) {
   }
   const tiles = [
     { label: "Loan to income", value: formatRatio(metrics.loan_to_income), hint: "loan ÷ annual income" },
-    { label: "Payment to income", value: formatPercent(metrics.payment_to_income), hint: "installment ÷ monthly income" },
+    { label: "Payment to income", value: formatRatio(metrics.payment_to_income), hint: "annuity ÷ monthly income" },
     {
       label: "Income mismatch",
       value: metrics.income_mismatch_pct == null ? "No document" : formatPercent(metrics.income_mismatch_pct),
@@ -97,7 +97,7 @@ const FIELD_ROWS: { key: keyof ApplicantFields; label: string; kind: "amount" | 
   { key: "annual_income", label: "Annual income (form)", kind: "amount" },
   { key: "document_income", label: "Annual income (document)", kind: "amount" },
   { key: "loan_amount", label: "Loan amount", kind: "amount" },
-  { key: "annuity", label: "Monthly installment", kind: "amount" },
+  { key: "annuity", label: "Loan annuity", kind: "amount" },
   { key: "goods_price", label: "Goods price", kind: "amount" },
   { key: "years_employed", label: "Years employed", kind: "years" },
   { key: "ext_source_1", label: "External score 1", kind: "score" },
@@ -105,11 +105,12 @@ const FIELD_ROWS: { key: keyof ApplicantFields; label: string; kind: "amount" | 
   { key: "ext_source_3", label: "External score 3", kind: "score" },
 ];
 
-const BUREAU_FIELDS: (keyof ApplicantFields)[] = ["ext_source_1", "ext_source_2", "ext_source_3"];
+// Not typed by the applicant: bureau scores, and the income read from their document.
+const NOT_ON_FORM: (keyof ApplicantFields)[] = ["document_income", "ext_source_1", "ext_source_2", "ext_source_3"];
 
-/** Applicant fields; `formOnly` hides bureau scores, which the applicant never provides. */
+/** Applicant fields; `formOnly` shows only what the applicant typed into the form. */
 export function FieldList({ fields, formOnly = false }: { fields: ApplicantFields | null; formOnly?: boolean }) {
-  const rows = formOnly ? FIELD_ROWS.filter((r) => !BUREAU_FIELDS.includes(r.key)) : FIELD_ROWS;
+  const rows = formOnly ? FIELD_ROWS.filter((r) => !NOT_ON_FORM.includes(r.key)) : FIELD_ROWS;
   return (
     <dl className="divide-y divide-line">
       {rows.map((row) => {
@@ -130,22 +131,42 @@ export function FieldList({ fields, formOnly = false }: { fields: ApplicantField
 
 const ACTOR_STYLE: Record<string, string> = {
   applicant: "bg-sky-100 text-sky-700",
-  agent: "bg-brand-100 text-brand-700",
-  router: "bg-lavender-100 text-lavender-700",
-  reviewer: "bg-peach-100 text-peach-700",
+  system: "bg-brand-100 text-brand-700",
 };
+// Any other actor is a reviewer id (pipeline.py writes reviewer decisions with actor=reviewer_id).
+const REVIEWER_STYLE = "bg-peach-100 text-peach-700";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/** One-line summary of an event payload, per event type written by api/app/agent/pipeline.py. */
 function describe(event: AuditEvent): string {
-  const { from, to, recommendation, confidence, decision, override, answer } = event.payload;
-  if (event.event_type === "status_changed" && typeof to === "string") {
-    return `${typeof from === "string" ? humanize(from) : "—"} → ${humanize(to)}`;
+  const p = event.payload;
+  switch (event.event_type) {
+    case "status_changed":
+      return typeof p.to === "string" ? `${typeof p.from === "string" ? humanize(p.from) : "—"} → ${humanize(p.to)}` : "";
+    case "missing_fields":
+      return Array.isArray(p.missing) ? `Missing: ${p.missing.join(", ")}` : "";
+    case "recommendation": {
+      const out = p.output;
+      if (!isRecord(out) || typeof out.recommendation !== "string") return "";
+      const confidence = typeof out.confidence === "number" ? ` at ${Math.round(out.confidence * 100)}%` : "";
+      return `Recommended ${out.recommendation}${confidence}`;
+    }
+    case "routed":
+      return typeof p.status === "string" ? `Routed to ${humanize(p.status).toLowerCase()}` : "";
+    case "applicant_replied":
+      return Array.isArray(p.corrected_fields) && p.corrected_fields.length
+        ? `Corrected ${p.corrected_fields.join(", ")}`
+        : "Answered the question";
+    case "reviewer_decision": {
+      const final = typeof p.final_decision === "string" ? humanize(p.final_decision) : "";
+      return `${final}${p.action === "override" ? " (override)" : ""}`;
+    }
+    default:
+      return "";
   }
-  if (typeof recommendation === "string") {
-    return `Recommended ${recommendation}${typeof confidence === "number" ? ` at ${Math.round(confidence * 100)}%` : ""}`;
-  }
-  if (typeof decision === "string") return `${humanize(decision)}${override === true ? " (override)" : ""}`;
-  if (typeof answer === "string") return `“${answer}”`;
-  return "";
 }
 
 export function AuditTrail({ events }: { events: AuditEvent[] }) {
@@ -161,7 +182,7 @@ export function AuditTrail({ events }: { events: AuditEvent[] }) {
             <li key={e.id} className="mb-4 ml-4 last:mb-0">
               <span className="absolute -left-[5px] mt-1.5 size-2.5 rounded-full bg-brand-300 ring-4 ring-canvas" />
               <div className="flex flex-wrap items-center gap-2">
-                <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${ACTOR_STYLE[e.actor] ?? "bg-slate-100 text-slate-600"}`}>
+                <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${ACTOR_STYLE[e.actor] ?? REVIEWER_STYLE}`}>
                   {e.actor}
                 </span>
                 <span className="text-sm font-medium text-ink">{humanize(e.event_type)}</span>

@@ -1,14 +1,14 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useState, type ChangeEvent, type FormEvent } from "react";
 import { Container, PageHeader } from "@/components/page-header";
 import { Button, InlineError } from "@/components/ui";
 import { data } from "@/lib/data";
 import { errorMessage } from "@/lib/errors";
-import type { CreateApplicationRequest } from "@/lib/types";
+import type { ApplicationForm, DocumentKind } from "@/lib/types";
 
-type FieldKey = keyof CreateApplicationRequest;
+type FieldKey = "loan_amount" | "goods_price" | "annuity" | "annual_income" | "years_employed";
 
 interface FieldDef {
   key: FieldKey;
@@ -25,51 +25,42 @@ const SECTIONS: { title: string; body: string; fields: FieldDef[] }[] = [
     fields: [
       { key: "loan_amount", label: "Loan amount", hint: "How much you would like to borrow.", required: true },
       { key: "goods_price", label: "Price of the goods", hint: "What the loan pays for.", required: true },
-      { key: "annuity", label: "Monthly installment", hint: "The repayment you expect each month.", required: true, suffix: "/ month" },
+      { key: "annuity", label: "Loan annuity", hint: "The repayment amount on the loan.", required: true },
     ],
   },
   {
     title: "Your income",
-    body: "We compare what you tell us with your bank statement, if you share one.",
+    body: "The income you state here is checked against any document you attach below.",
     fields: [
       { key: "annual_income", label: "Annual income", hint: "Your total yearly income before tax.", required: true, suffix: "/ year" },
-      {
-        key: "document_income",
-        label: "Income on your bank statement",
-        hint: "The yearly income your statement shows.",
-        required: false,
-        suffix: "/ year",
-      },
+      { key: "years_employed", label: "Years with current employer", hint: "Use decimals for months, e.g. 1.5.", required: false, suffix: "years" },
     ],
-  },
-  {
-    title: "Employment",
-    body: "Helps us understand how stable your income is.",
-    fields: [{ key: "years_employed", label: "Years with current employer", hint: "Use decimals for months, e.g. 1.5.", required: false, suffix: "years" }],
   },
 ];
 
 const FIELDS = SECTIONS.flatMap((s) => s.fields);
 
-type FormState = Record<FieldKey, string>;
+const DOCUMENT_KINDS: { value: DocumentKind; label: string }[] = [
+  { value: "bank_statement", label: "Bank statement" },
+  { value: "salary_slip", label: "Salary slip" },
+];
 
-const EMPTY: FormState = {
-  loan_amount: "",
-  goods_price: "",
-  annuity: "",
-  annual_income: "",
-  document_income: "",
-  years_employed: "",
-};
+// Plain-text files only: the API takes documents already converted to text.
+const MAX_DOCUMENT_CHARS = 20_000;
+const TEXT_FILE_ACCEPT = ".txt,.csv,.md,text/plain";
+
+type NumberState = Record<FieldKey, string>;
+
+const EMPTY: NumberState = { loan_amount: "", goods_price: "", annuity: "", annual_income: "", years_employed: "" };
 
 function toNumber(raw: string): number | null {
   const trimmed = raw.replaceAll(",", "").trim();
   return trimmed === "" ? null : Number(trimmed);
 }
 
-function validate(form: FormState): string | null {
+function validate(values: NumberState): string | null {
   for (const f of FIELDS) {
-    const n = toNumber(form[f.key]);
+    const n = toNumber(values[f.key]);
     if (n === null) continue;
     if (!Number.isFinite(n)) return `${f.label} must be a number.`;
     if (f.key === "years_employed" ? n < 0 : n <= 0) return `${f.label} must be greater than zero.`;
@@ -77,28 +68,64 @@ function validate(form: FormState): string | null {
   return null;
 }
 
+function buildForm(values: NumberState): ApplicationForm {
+  return {
+    annual_income: toNumber(values.annual_income),
+    loan_amount: toNumber(values.loan_amount),
+    annuity: toNumber(values.annuity),
+    goods_price: toNumber(values.goods_price),
+    years_employed: toNumber(values.years_employed),
+    // Bureau scores never come from the applicant.
+    ext_source_1: null,
+    ext_source_2: null,
+    ext_source_3: null,
+  };
+}
+
 export default function ApplyPage() {
   const router = useRouter();
-  const [form, setForm] = useState<FormState>(EMPTY);
+  const [values, setValues] = useState<NumberState>(EMPTY);
+  const [docKind, setDocKind] = useState<DocumentKind>("bank_statement");
+  const [docName, setDocName] = useState("");
+  const [docText, setDocText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const required = FIELDS.filter((f) => f.required);
-  const missing = required.filter((f) => form[f.key].trim() === "");
+  const missing = required.filter((f) => values[f.key].trim() === "");
   const started = missing.length < required.length;
+
+  async function onFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const text = await file.text();
+      if (text.length > MAX_DOCUMENT_CHARS) {
+        setError(`That file is too long. Keep documents under ${MAX_DOCUMENT_CHARS.toLocaleString()} characters.`);
+        return;
+      }
+      setDocText(text);
+      setDocName(file.name);
+      setError(null);
+    } catch (err) {
+      setError(`Could not read ${file.name}: ${errorMessage(err)}`);
+    }
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    const invalid = validate(form);
+    const invalid = validate(values);
     if (invalid) {
       setError(invalid);
       return;
     }
     setError(null);
     setSubmitting(true);
+    const text = docText.trim();
+    const documents = text ? [{ name: docName || `${docKind}.txt`, kind: docKind, text }] : [];
     try {
-      const body = Object.fromEntries(FIELDS.map((f) => [f.key, toNumber(form[f.key])])) as unknown as CreateApplicationRequest;
-      const { id } = await data.createApplication(body);
+      const { id } = await data.createApplication({ form: buildForm(values), documents });
       router.push(`/applications/${id}`);
     } catch (err) {
       setError(errorMessage(err));
@@ -125,7 +152,7 @@ export default function ApplyPage() {
               </div>
               <div className="grid gap-5 sm:grid-cols-2">
                 {section.fields.map((f) => (
-                  <label key={f.key} className={`flex flex-col gap-1.5 ${section.fields.length === 1 ? "sm:col-span-2 sm:max-w-sm" : ""}`}>
+                  <label key={f.key} className="flex flex-col gap-1.5">
                     <span className="flex items-center gap-2 text-sm font-semibold text-ink">
                       {f.label}
                       {!f.required && <span className="text-xs font-normal text-muted">(optional)</span>}
@@ -133,8 +160,8 @@ export default function ApplyPage() {
                     <span className="flex items-center rounded-xl border border-line bg-white transition focus-within:border-brand-400 focus-within:ring-4 focus-within:ring-brand-100">
                       <input
                         inputMode="decimal"
-                        value={form[f.key]}
-                        onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
+                        value={values[f.key]}
+                        onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
                         placeholder="0"
                         className="w-full min-w-0 bg-transparent px-4 py-3 tabular-nums text-ink outline-none placeholder:text-muted/40"
                       />
@@ -146,6 +173,66 @@ export default function ApplyPage() {
               </div>
             </section>
           ))}
+
+          <section className="grid gap-6 border-b border-line p-6 sm:p-8 md:grid-cols-[14rem_1fr]">
+            <div>
+              <h2 className="text-base font-bold text-ink">
+                Supporting document <span className="text-xs font-normal text-muted">(optional)</span>
+              </h2>
+              <p className="mt-1 text-sm text-muted">
+                Paste the text of a bank statement or salary slip. If it states an annual income, we compare it with
+                yours.
+              </p>
+            </div>
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="inline-flex rounded-full bg-canvas p-1 ring-1 ring-inset ring-line">
+                  {DOCUMENT_KINDS.map((k) => (
+                    <button
+                      key={k.value}
+                      type="button"
+                      onClick={() => setDocKind(k.value)}
+                      className={`rounded-full px-4 py-1.5 text-sm font-semibold transition ${
+                        docKind === k.value ? "bg-white text-ink shadow-sm ring-1 ring-line" : "text-muted hover:text-ink"
+                      }`}
+                    >
+                      {k.label}
+                    </button>
+                  ))}
+                </div>
+                <label className="cursor-pointer rounded-full px-4 py-1.5 text-sm font-semibold text-brand-700 ring-1 ring-inset ring-brand-200 transition hover:bg-brand-50">
+                  Load a .txt file
+                  <input type="file" accept={TEXT_FILE_ACCEPT} onChange={onFile} className="sr-only" />
+                </label>
+                {docName && (
+                  <span className="flex items-center gap-2 text-xs text-muted">
+                    {docName}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDocName("");
+                        setDocText("");
+                      }}
+                      className="font-semibold text-rose-600 hover:text-rose-700"
+                    >
+                      Remove
+                    </button>
+                  </span>
+                )}
+              </div>
+              <textarea
+                value={docText}
+                onChange={(e) => setDocText(e.target.value.slice(0, MAX_DOCUMENT_CHARS))}
+                rows={6}
+                placeholder={"Account holder statement, Jan to Dec\nEmployer: Acme Ltd.\nAnnual income: 150,000"}
+                className="w-full resize-y rounded-xl border border-line px-4 py-3 font-mono text-sm text-ink outline-none transition placeholder:text-muted/40 focus:border-brand-400 focus:ring-4 focus:ring-brand-100"
+              />
+              <p className="text-xs text-muted">
+                Tip: a line like <span className="font-mono text-ink">Annual income: 150,000</span> is the clearest way to
+                state yearly income. Leave out personal details such as your age or family status.
+              </p>
+            </div>
+          </section>
 
           <div className="flex flex-col gap-4 p-6 sm:p-8">
             {started && missing.length > 0 && (
@@ -169,8 +256,8 @@ export default function ApplyPage() {
             <h2 className="text-sm font-bold text-ink">What happens next</h2>
             <ol className="mt-4 space-y-4">
               {[
-                "We compute affordability from your numbers.",
-                "If something is missing or doesn't match, we ask you one clear question.",
+                "We read your form and any document, and compute affordability in code.",
+                "If something is missing or your income doesn't match the document, we ask you one clear question.",
                 "Larger loans and any possible decline always go to a loan officer.",
               ].map((t, i) => (
                 <li key={t} className="flex gap-3 text-sm text-muted">

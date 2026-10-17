@@ -6,11 +6,12 @@ import { useState, type FormEvent } from "react";
 import { AuditTrail, ConfidenceMeter, FieldList, MetricTiles, StatusSteps } from "@/components/case-parts";
 import { Container, ContentSection, PageHeader } from "@/components/page-header";
 import { Button, EmptyState, ErrorState, InlineError, RecommendationBadge, Skeleton, StatusBadge } from "@/components/ui";
-import { data, finalDecision, openQuestion } from "@/lib/data";
+import { data } from "@/lib/data";
+import { contradictsAgent, decisionRequest } from "@/lib/decision";
 import { errorMessage } from "@/lib/errors";
 import { shortId, timeAgo } from "@/lib/format";
 import { useApplicationCase } from "@/lib/hooks";
-import type { Application, HumanDecision, Recommendation } from "@/lib/types";
+import type { Application, HumanDecision } from "@/lib/types";
 
 const CRUMBS = [
   { href: "/", label: "Home" },
@@ -56,8 +57,7 @@ export default function ReviewCasePage() {
 
   const { app, events } = result;
   const out = app.agent_output;
-  const question = openQuestion(app, events);
-  const decided = app.status === "decided" ? finalDecision(events) : null;
+  const question = app.status === "needs_info" ? app.human_question : null;
 
   return (
     <>
@@ -124,13 +124,14 @@ export default function ReviewCasePage() {
         <aside className="space-y-10 lg:sticky lg:top-24 lg:self-start">
           {app.status === "pending_review" || app.status === "auto_cleared" ? (
             <DecisionPanel app={app} />
-          ) : decided ? (
-            <div className={`rounded-2xl p-6 ${decided.decision === "approve" ? "bg-brand-50" : "bg-rose-50"}`}>
+          ) : app.status === "decided" && app.final_decision ? (
+            <div className={`rounded-2xl p-6 ${app.final_decision === "approve" ? "bg-brand-50" : "bg-rose-50"}`}>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted">Final decision</p>
-              <p className={`mt-1 text-2xl font-bold ${decided.decision === "approve" ? "text-brand-700" : "text-rose-700"}`}>
-                {decided.decision === "approve" ? "Approved" : "Rejected"}
+              <p className={`mt-1 text-2xl font-bold ${app.final_decision === "approve" ? "text-brand-700" : "text-rose-700"}`}>
+                {app.final_decision === "approve" ? "Approved" : "Rejected"}
               </p>
-              {decided.reason && <p className="mt-2 text-sm text-muted">{decided.reason}</p>}
+              {app.decision_reason && <p className="mt-2 text-sm text-muted">{app.decision_reason}</p>}
+              {app.decided_by && <p className="mt-3 text-xs text-muted">Decided by {app.decided_by}</p>}
             </div>
           ) : (
             <div className="rounded-2xl border border-dashed border-line p-6">
@@ -148,22 +149,42 @@ export default function ReviewCasePage() {
   );
 }
 
-function isOverride(decision: HumanDecision, recommendation: Recommendation | undefined): boolean {
-  return (decision === "approve" && recommendation === "decline") || (decision === "reject" && recommendation === "approve");
+const REVIEWER_ID_KEY = "clearpath.reviewerId";
+
+// Remembered per browser as a convenience; the page works without storage.
+function loadReviewerId(): string {
+  try {
+    return window.localStorage.getItem(REVIEWER_ID_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function saveReviewerId(id: string): void {
+  try {
+    window.localStorage.setItem(REVIEWER_ID_KEY, id);
+  } catch {
+    // Storage blocked (private window); the id is simply not remembered.
+  }
 }
 
 function DecisionPanel({ app }: { app: Application }) {
   const recommendation = app.agent_output?.recommendation;
   const [decision, setDecision] = useState<HumanDecision>(recommendation === "decline" ? "reject" : "approve");
   const [reason, setReason] = useState("");
+  const [reviewerId, setReviewerId] = useState(loadReviewerId);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const override = isOverride(decision, recommendation);
+  const override = contradictsAgent(decision, recommendation);
   const reasonRequired = decision === "reject" || override;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    if (!reviewerId.trim()) {
+      setError("Enter your reviewer ID so the decision is attributed to you.");
+      return;
+    }
     if (reasonRequired && !reason.trim()) {
       setError(override ? "An override needs a reason. It is stored in the override log." : "A rejection needs a reason.");
       return;
@@ -171,7 +192,8 @@ function DecisionPanel({ app }: { app: Application }) {
     setSaving(true);
     setError(null);
     try {
-      await data.decide(app.id, { decision, override, reason: reason.trim() || null });
+      saveReviewerId(reviewerId.trim());
+      await data.decide(app.id, decisionRequest(reviewerId.trim(), decision, recommendation, reason.trim() || null));
     } catch (err) {
       setError(errorMessage(err));
       setSaving(false);
@@ -208,6 +230,16 @@ function DecisionPanel({ app }: { app: Application }) {
             override.
           </p>
         )}
+
+        <label className="block">
+          <span className="text-sm font-semibold text-ink">Reviewer ID</span>
+          <input
+            value={reviewerId}
+            onChange={(e) => setReviewerId(e.target.value)}
+            placeholder="e.g. officer.ahmed"
+            className="mt-1.5 w-full rounded-xl border border-line px-4 py-2.5 text-sm text-ink outline-none transition focus:border-brand-400 focus:ring-4 focus:ring-brand-100"
+          />
+        </label>
 
         <label className="block">
           <span className="text-sm font-semibold text-ink">
