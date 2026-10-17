@@ -32,8 +32,8 @@ POLICY_DECLINE_SCORE_AVERAGE: float = 0.35  # p15
 POLICY_REFER_SCORE_AVERAGE: float = 0.44  # p30
 
 # --- Model calls ---
-# PLACEHOLDER: per-call timeout for the model, in seconds.
-MODEL_TIMEOUT_SECONDS: float = 30.0
+# Per-call timeout for the model, in seconds. Generous because the fine-tune may run on CPU.
+MODEL_TIMEOUT_SECONDS: float = 120.0
 # Fixed by hard rule 7: retry once, then fall back to refer.
 MODEL_MAX_RETRIES: int = 1
 
