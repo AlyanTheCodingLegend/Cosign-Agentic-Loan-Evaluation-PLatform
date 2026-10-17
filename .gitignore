@@ -40,3 +40,12 @@ pnpm-debug.log*
 Thumbs.db
 .vscode/
 .idea/
+
+# Home Credit data and sampled output
+api/seed/home_credit_sample.jsonl
+*.csv
+
+# Fine-tuning data bundle (derived from Home Credit competition data; do not publish)
+ml/kaggle_bundle/
+ml/data/
+ml/serve/Modelfile

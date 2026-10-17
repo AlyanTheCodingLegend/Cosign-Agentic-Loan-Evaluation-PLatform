@@ -1,0 +1,215 @@
+[
+  {
+    "key": "clean_approve",
+    "description": "Healthy ratios, all three external scores present, documents agree with the form.",
+    "input": {
+      "form": {
+        "annual_income": 150000,
+        "loan_amount": 450000,
+        "annuity": 15000,
+        "goods_price": 400000,
+        "years_employed": 6.0,
+        "ext_source_1": 0.72,
+        "ext_source_2": 0.68,
+        "ext_source_3": 0.7
+      },
+      "documents": [
+        {
+          "name": "salary_slip.txt",
+          "kind": "salary_slip",
+          "text": "Employer: Acme Ltd. Annual income: 150,000"
+        }
+      ]
+    },
+    "expected_status": "auto_cleared",
+    "expected_events": [
+      "fields_extracted",
+      "recommendation",
+      "routed"
+    ]
+  },
+  {
+    "key": "missing_scores_low_confidence",
+    "description": "Two of three external scores are null, so the agent is less confident and a human reviews.",
+    "input": {
+      "form": {
+        "annual_income": 150000,
+        "loan_amount": 450000,
+        "annuity": 15000,
+        "goods_price": 400000,
+        "years_employed": 3.0,
+        "ext_source_2": 0.66
+      }
+    },
+    "expected_status": "pending_review",
+    "expected_events": [
+      "fields_extracted",
+      "recommendation",
+      "routed"
+    ]
+  },
+  {
+    "key": "missing_annuity",
+    "description": "The form omits the annuity, so the agent asks instead of guessing.",
+    "input": {
+      "form": {
+        "annual_income": 150000,
+        "loan_amount": 450000,
+        "goods_price": 400000,
+        "ext_source_1": 0.7,
+        "ext_source_2": 0.7,
+        "ext_source_3": 0.7
+      }
+    },
+    "expected_status": "needs_info",
+    "expected_events": [
+      "fields_extracted",
+      "missing_fields"
+    ],
+    "reply": {
+      "answer": "The yearly payment is 15,000.",
+      "corrections": {
+        "annuity": 15000
+      },
+      "expected_status": "auto_cleared"
+    }
+  },
+  {
+    "key": "income_mismatch",
+    "description": "Stated income is 150,000 but the salary slip says 100,000.",
+    "input": {
+      "form": {
+        "annual_income": 150000,
+        "loan_amount": 450000,
+        "annuity": 12000,
+        "goods_price": 400000,
+        "ext_source_1": 0.7,
+        "ext_source_2": 0.7,
+        "ext_source_3": 0.7
+      },
+      "documents": [
+        {
+          "name": "salary_slip.txt",
+          "kind": "salary_slip",
+          "text": "Employer: Acme Ltd. Annual income: 100,000"
+        }
+      ]
+    },
+    "expected_status": "needs_info",
+    "expected_events": [
+      "fields_extracted",
+      "recommendation",
+      "routed"
+    ],
+    "reply": {
+      "answer": "The salary slip is correct; my form figure was a typo.",
+      "corrections": {
+        "annual_income": 100000
+      },
+      "expected_status": "auto_cleared"
+    }
+  },
+  {
+    "key": "high_loan_amount",
+    "description": "Strong applicant, but the loan is above the high-amount cutoff so a human always signs off.",
+    "input": {
+      "form": {
+        "annual_income": 900000,
+        "loan_amount": 2500000,
+        "annuity": 60000,
+        "goods_price": 2300000,
+        "years_employed": 10.0,
+        "ext_source_1": 0.8,
+        "ext_source_2": 0.8,
+        "ext_source_3": 0.8
+      }
+    },
+    "expected_status": "pending_review",
+    "expected_events": [
+      "fields_extracted",
+      "recommendation",
+      "routed"
+    ]
+  },
+  {
+    "key": "unaffordable_decline",
+    "description": "Payment is 4.8x monthly income (above the 90th percentile); the agent recommends decline and a human checks it.",
+    "input": {
+      "form": {
+        "annual_income": 150000,
+        "loan_amount": 450000,
+        "annuity": 60000,
+        "goods_price": 400000,
+        "ext_source_1": 0.6,
+        "ext_source_2": 0.6,
+        "ext_source_3": 0.6
+      }
+    },
+    "expected_status": "pending_review",
+    "expected_events": [
+      "fields_extracted",
+      "recommendation",
+      "routed"
+    ]
+  },
+  {
+    "key": "borderline_refer",
+    "description": "Payment-to-income is 2.88, inside the 75th-90th percentile refer band, so the agent refers.",
+    "input": {
+      "form": {
+        "annual_income": 150000,
+        "loan_amount": 450000,
+        "annuity": 36000,
+        "goods_price": 400000,
+        "ext_source_1": 0.6,
+        "ext_source_2": 0.6,
+        "ext_source_3": 0.6
+      }
+    },
+    "expected_status": "pending_review",
+    "expected_events": [
+      "fields_extracted",
+      "recommendation",
+      "routed"
+    ]
+  },
+  {
+    "key": "high_loan_to_income_refer",
+    "description": "Loan is 6x annual income, above the loan-to-income refer limit; this only ever refers, never declines.",
+    "input": {
+      "form": {
+        "annual_income": 100000,
+        "loan_amount": 600000,
+        "annuity": 12000,
+        "goods_price": 550000,
+        "ext_source_1": 0.7,
+        "ext_source_2": 0.7,
+        "ext_source_3": 0.7
+      }
+    },
+    "expected_status": "pending_review",
+    "expected_events": [
+      "fields_extracted",
+      "recommendation",
+      "routed"
+    ]
+  },
+  {
+    "key": "no_external_scores",
+    "description": "All three external scores are null; the agent refers and asks for one.",
+    "input": {
+      "form": {
+        "annual_income": 150000,
+        "loan_amount": 450000,
+        "annuity": 15000,
+        "goods_price": 400000
+      }
+    },
+    "expected_status": "pending_review",
+    "expected_events": [
+      "fields_extracted",
+      "recommendation",
+      "routed"
+    ]
+  }
+]

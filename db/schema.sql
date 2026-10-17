@@ -8,9 +8,17 @@ create table applications (
         check (status in (
             'submitted', 'analyzing', 'needs_info', 'pending_review', 'auto_cleared', 'decided'
         )),
+    -- Raw submission: form, documents, applicant replies and corrections (ApplicationInput).
+    input jsonb not null,
     fields jsonb,
     metrics jsonb,
     agent_output jsonb,
+    -- Question for the applicant while status is needs_info; null otherwise.
+    human_question text,
+    -- Set when a human decides. Reject and override always carry a reason.
+    final_decision text check (final_decision in ('approve', 'reject')),
+    decision_reason text,
+    decided_by text,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
 );
@@ -39,6 +47,7 @@ create table audit_log (
 create table override_log (
     id bigint generated always as identity primary key,
     application_id uuid not null references applications (id),
+    reviewer_id text not null,
     agent_recommendation text not null
         check (agent_recommendation in ('approve', 'decline', 'refer')),
     human_decision text not null

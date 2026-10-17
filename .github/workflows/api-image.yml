@@ -1,0 +1,52 @@
+# Builds and publishes the API image when a version tag is pushed, for example:
+#   git tag v0.1.0 && git push origin v0.1.0
+# Publishes ghcr.io/<owner>/cosign-api:0.1.0. After the first run, make the package public in
+# GitHub (Packages -> cosign-api -> Package settings -> Change visibility), because the
+# deployment platform cannot pull private images.
+name: api-image
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install and test
+        working-directory: api
+        run: |
+          pip install -e ".[dev]"
+          ruff check .
+          mypy app
+          pytest -q
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/cosign-api
+          tags: type=semver,pattern={{version}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./api
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
