@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+/* Soft pastel palette in the spirit of HBL's teal green, on a mint-tinted canvas. */
+@theme {
+  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+
+  --color-canvas: #f7fbf9;
+  --color-ink: #12312b;
+  --color-muted: #5f7a73;
+  --color-line: #e1ece8;
+
+  --color-brand-50: #ecf8f4;
+  --color-brand-100: #d5f0e7;
+  --color-brand-200: #ade1d0;
+  --color-brand-300: #7ccbb3;
+  --color-brand-400: #48b094;
+  --color-brand-500: #20967b;
+  --color-brand-600: #0f7c66;
+  --color-brand-700: #0d6354;
+  --color-brand-800: #0e4f44;
+  --color-brand-900: #0c3f37;
+
+  --color-peach-50: #fff4e8;
+  --color-peach-100: #ffe7cc;
+  --color-peach-200: #fbd5a8;
+  --color-peach-400: #f0a554;
+  --color-peach-700: #94571a;
+
+  --color-lavender-50: #f2efff;
+  --color-lavender-100: #e5dffd;
+  --color-lavender-200: #d3c9f8;
+  --color-lavender-400: #9d89e6;
+  --color-lavender-700: #5541a8;
+
+  --shadow-soft: 0 1px 2px rgb(18 49 43 / 0.04), 0 8px 24px -12px rgb(18 49 43 / 0.12);
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgb(72 176 148 / 0.45); }
+  100% { box-shadow: 0 0 0 10px rgb(72 176 148 / 0); }
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 1.6s ease-out infinite;
+}
