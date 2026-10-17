@@ -86,6 +86,8 @@ Target platform: Alternate Clouds (https://clouds.alternatefutures.ai, docs at h
 - [ ] Deploy it the same way as an image. Set its API base URL to the API's public URL and use the Supabase URL and anon key. Never give it the service role key.
 - [ ] Put the web app's public origin in the API's `CORS_ORIGINS`, then redeploy the API.
 
+**Deploy one service per commit.** Alternate Clouds names a build-from-GitHub image after the repo and the commit only, not the service or folder. If two services (api, web, model) build from the same commit they overwrite each other's image, and a service can end up running another service's app (the API once served the Next.js app, so `/health` returned 502). Give each service its own commit before deploying it: push a small commit, deploy one service, then repeat. Deploy one service at a time, because two simultaneous deployments can fail with an on-chain "code 32" error; retrying fixes it.
+
 **6. Before the demo**
 - [ ] Make sure the account has credit for at least one hour of running cost; the platform will not place a deployment without it.
 - [ ] Delete test rows from `applications` if you want a clean queue. The audit and override logs are append-only by design and cannot be cleared.
