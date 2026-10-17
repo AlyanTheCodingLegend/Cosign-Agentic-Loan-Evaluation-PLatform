@@ -67,7 +67,13 @@ Target platform: Alternate Clouds (https://clouds.alternatefutures.ai, docs at h
 - [ ] `npm install -g @alternatefutures/acc`, then `acc login` and `acc projects create --name cosign`.
 - [ ] Create the service. Replace the values; `MODEL_BASE_URL` ends in `/v1`:
   ```
-  acc services create --kind docker --image ghcr.io/<owner>/cosign-api:0.1.0 --port 8000 --name cosign-api     --env USE_FAKES=false     --env SUPABASE_URL=https://<project>.supabase.co     --env SUPABASE_KEY=<service role key>     --env MODEL_BASE_URL=<model url>/v1 --env MODEL_NAME=cosign --env MODEL_API_KEY=ollama     --env CORS_ORIGINS=https://<web-slug>-app.alternatefutures.ai     -y
+  acc services create --kind docker --image ghcr.io/<owner>/cosign-api:0.1.0 --port 8000 --name cosign-api \
+    --env USE_FAKES=false \
+    --env SUPABASE_URL=https://<project>.supabase.co \
+    --env SUPABASE_KEY=<service role key> \
+    --env MODEL_BASE_URL=<model url>/v1 --env MODEL_NAME=cosign --env MODEL_API_KEY=ollama \
+    --env CORS_ORIGINS=https://<web-slug>-app.alternatefutures.ai \
+    -y
   ```
 - [ ] Add `--confidential` to run on a TEE. Services run on third-party providers, who start the container with your environment variables, so the Supabase service role key is visible to them. Use `--confidential` if your plan allows it, and rotate the key after the demo.
 - [ ] `acc services list` shows the status and public URL. `acc services logs cosign-api --tail 100` shows logs.
